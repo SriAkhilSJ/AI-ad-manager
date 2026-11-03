@@ -61,6 +61,15 @@ class ApprovalRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     creative_asset_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     creative_binding_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+    # Phase 3C.1: a real Flow generation needs an approval bound to these fields.
+    flow_prompt_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    flow_provider: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    flow_model: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    flow_aspect_ratio: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    flow_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    flow_output_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    flow_binding_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     invalidated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

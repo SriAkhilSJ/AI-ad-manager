@@ -1714,6 +1714,196 @@ def main() -> int:
 
     harness.check("47. Phase 1/2/2.5/2.6/3A acceptance is intact", c47)
 
+    # ---- Phase 3C.1: DeepX Flow bridge security ---------------------------
+    flow = "/flow"
+
+    def c48() -> str:
+        """The Flow integration is reported honestly and generation stays off."""
+        _, status = http.call("GET", f"{flow}/status", expect=200)
+        assert status["phase"] == "3C.1"
+        assert status["live_generation_enabled"] is False
+        assert status["available"] is False and status["enabled"] is False
+        bridge = status["bridge"]
+        assert bridge["bind_host"] == "127.0.0.1", bridge["bind_host"]
+        assert bridge["loopback_only"] is True
+        assert bridge["mode"] == "local_companion"
+        assert bridge["command_allowlist"] == [
+            "status", "generate_image", "generate_video", "check_video_status", "export_asset"
+        ]
+        policy = status["token_policy"]
+        assert policy == {
+            "page_visible_tokens": False,
+            "arbitrary_api_urls": False,
+            "approved_endpoints_only": True,
+            "logging": "redacted",
+        }
+        assert status["generation"]["max_live_jobs"] == 1
+        assert status["generation"]["unknown_submission_policy"] == "never_resubmitted_automatically"
+        assert status["asset_export"]["assets_created_before_verification"] is False
+        blockers = {row["id"] for row in status["upstream_blockers"]}
+        assert blockers == {f"U{i}" for i in range(1, 8)}, blockers
+        _, system = http.call("GET", "/system/status", expect=200)
+        assert system["flow"]["live_generation_enabled"] is False
+        return (
+            f"phase 3C.1, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
+            f"max_live_jobs=1, {len(blockers)} upstream blockers reported (generation off)"
+        )
+
+    harness.check("48. Flow status is honest and live generation is off", c48)
+
+    def c49() -> str:
+        """The command surface is an allowlist, not the upstream MCP tool dump."""
+        _, caps = http.call("GET", f"{flow}/capabilities", expect=200)
+        allowed = set(caps["allowed_commands"])
+        denied = {row["command"] for row in caps["denied_commands"]}
+        for command in (
+            "status", "generate_image", "generate_video", "check_video_status", "export_asset"
+        ):
+            assert command in allowed, command
+        for command in (
+            "eval_script", "native_click", "native_key", "batch_generate",
+            "rapid_batch_dispatch", "autonomous_storyboard_pipeline",
+            "rename_project", "open_new_project", "api_post", "get_token",
+        ):
+            assert command in denied, command
+            assert command not in allowed, f"{command} is both allowed and denied"
+        assert allowed.isdisjoint(denied)
+        # The OpenAPI document lives at the app root, outside the /api/v1 prefix.
+        with urllib.request.urlopen(
+            f"{args.base_url.rstrip('/')}/openapi.json", timeout=60
+        ) as schema_response:
+            schema = json.loads(schema_response.read())
+        paths = " ".join(schema["paths"])
+        for needle in ("eval", "api_post", "get_token", "native_", "storyboard", "script"):
+            assert needle not in paths, f"route surface exposes {needle}"
+        return (
+            f"{len(allowed)} allowlisted commands, {len(denied)} denied by name; "
+            f"no eval/api_post/get_token/native/storyboard route exists"
+        )
+
+    harness.check("49. Dangerous Flow commands are denied by name", c49)
+
+    def c50() -> str:
+        """A real, os-level bridge binds loopback only and refuses everything else."""
+        code = (
+            "import asyncio, json\n"
+            "import httpx\n"
+            "from app.flow.bridge import BridgeConfig, FlowBridge\n"
+            "from app.flow.security import LoopbackBindError, generate_pairing_id, generate_pairing_secret\n"
+            "async def main():\n"
+            "    out = {}\n"
+            "    secret = generate_pairing_secret()\n"
+            "    pid = generate_pairing_id()\n"
+            "    try:\n"
+            "        FlowBridge(BridgeConfig(host='0.0.0.0', pairing_id=pid,\n"
+            "                    pairing_secret=secret, http_port=0, ws_port=0))\n"
+            "        out['public_bind'] = 'ALLOWED'\n"
+            "    except LoopbackBindError:\n"
+            "        out['public_bind'] = 'refused'\n"
+            "    bridge = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
+            "                    http_port=0, ws_port=0, extension_ids=('abcdefghijklmnopabcdefghijklmnop',)))\n"
+            "    await bridge.start()\n"
+            "    out['http_addr'] = list(bridge._http_server.sockets[0].getsockname()[:2])\n"
+            "    ws_sockets = getattr(bridge._ws_server, 'sockets', []) or []\n"
+            "    out['ws_addr'] = list(ws_sockets[0].getsockname()[:2]) if ws_sockets else []\n"
+            "    base = f'http://127.0.0.1:{bridge.http_port}'\n"
+            "    async with httpx.AsyncClient() as c:\n"
+            "        out['unauth'] = (await c.get(f'{base}/api/status')).status_code\n"
+            "        auth = {'X-Flow-Pairing': f'{pid}.{secret}'}\n"
+            "        out['auth'] = (await c.get(f'{base}/api/status', headers=auth)).status_code\n"
+            "        out['denied'] = (await c.post(f'{base}/api/command', headers=auth,\n"
+            "                        json={'command': 'eval_script', 'payload': {}})).status_code\n"
+            "        out['bad_host'] = (await c.get(f'{base}/api/status',\n"
+            "                        headers={**auth, 'Host': 'evil.example.com'})).status_code\n"
+            "        out['oversize'] = (await c.post(f'{base}/api/command', headers=auth,\n"
+            "                        content=b'x' * (bridge.config.max_request_bytes + 2048))).status_code\n"
+            "        out['unpaired'] = (await c.post(f'{base}/api/command', headers=auth,\n"
+            "                        json={'command': 'status', 'payload': {}})).status_code\n"
+            "    await bridge.stop()\n"
+            "    print(json.dumps(out))\n"
+            "asyncio.run(main())\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=120,
+        )
+        assert proc.returncode == 0, proc.stderr[-800:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["public_bind"] == "refused", result
+        assert result["http_addr"][0] == "127.0.0.1", result["http_addr"]
+        assert result["ws_addr"] and result["ws_addr"][0] == "127.0.0.1", result["ws_addr"]
+        assert result["unauth"] == 401, result
+        assert result["auth"] == 200, result
+        assert result["denied"] == 403, result
+        assert result["bad_host"] == 421, result
+        assert result["oversize"] == 413, result
+        assert result["unpaired"] == 503, result
+        return (
+            f"0.0.0.0 bind {result['public_bind']}; sockets {result['http_addr'][0]}:"
+            f"{result['http_addr'][1]} and {result['ws_addr'][0]}:{result['ws_addr'][1]}; "
+            f"unauth={result['unauth']}, denied={result['denied']}, bad_host={result['bad_host']}, "
+            f"oversize={result['oversize']}, unpaired={result['unpaired']}"
+        )
+
+    harness.check("50. The local bridge binds loopback only and authenticates", c50)
+
+    def c51() -> str:
+        """A companion cannot talk to Crusor without its 256-bit credential."""
+        payload = {"companion_id": "acceptance-companion", "label": "acceptance"}
+        anonymous = http.call("POST", f"{flow}/companion/hello", payload)
+        assert anonymous[0] == 401, anonymous
+        anonymous_body = json.dumps(anonymous[1])
+        forged = http.call(
+            "POST",
+            f"{flow}/companion/hello",
+            payload,
+            headers={"X-Companion-Id": "acceptance-companion", "X-Companion-Secret": "x" * 43},
+        )
+        assert forged[0] == 401, forged
+        for body in (anonymous_body, json.dumps(forged[1])):
+            assert "x" * 43 not in body
+            assert "pairing_secret" not in body
+            assert "X-Flow-Pairing" not in body
+        for path, body in (
+            (f"{flow}/companion/heartbeat", {"companion_id": "acceptance-companion"}),
+            (f"{flow}/companion/disconnect", {"companion_id": "acceptance-companion"}),
+        ):
+            assert http.call("POST", path, body)[0] == 401, path
+        assert http.call("GET", f"{flow}/companion/commands")[0] == 401
+        return (
+            "anonymous and forged companion credentials both rejected with 401 on "
+            "hello/heartbeat/disconnect/commands; no secret echoed in the error body"
+        )
+
+    harness.check("51. The companion endpoint rejects unauthenticated callers", c51)
+
+    def c52() -> str:
+        """A real Flow generation needs a founder approval and is still refused."""
+        brief_id = state["brief"]["id"]
+        body = {"brief_id": brief_id, "prompt": "acceptance: charcoal terminal frame",
+                "model": "imagen-3", "dry_run": True}
+        status, decision = http.call("POST", f"{flow}/generations", body)
+        assert status == 403, (status, decision)
+        assert decision["error"]["code"] == "flow_approval_required", decision
+        _, binding = http.call(
+            "POST", f"{flow}/binding", {**body, "brief_id": brief_id}, expect=200
+        )
+        assert len(binding["binding_hash"]) == 64
+        assert binding["binding"]["output_count"] == 1
+        real = http.call("POST", f"{flow}/generations", {**body, "dry_run": False})
+        assert real[0] == 403, real  # the gate runs first and still refuses
+        assert real[1]["error"]["code"] == "flow_approval_required"
+        return (
+            "generation refused with flow_approval_required (403) with and without dry_run; "
+            f"binding hash {binding['binding_hash'][:16]}… explains what a founder must approve"
+        )
+
+    harness.check("52. Flow generation is blocked by the approval gate", c52)
+
 
     # ---- summary ---------------------------------------------------------
     passed = sum(1 for _, ok, _ in harness.results if ok)

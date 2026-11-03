@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 
 from app.api.deps import DB
 from app.core.config import get_settings
+from app.services.flow_gateway import flow_status_payload
 from app.creative.providers import creative_provider_status
 from app.director.graph import graph_topology
 from app.llm.gateway import gateway_status
@@ -132,6 +133,7 @@ async def status(session: DB) -> dict[str, Any]:
                 "QA never claims visual verification; a human must review every asset."
             ),
         },
+        "flow": flow_status_payload(settings),
         "publishing": {
             "status": "unavailable",
             "mode": "human_approval_required",

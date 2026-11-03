@@ -32,6 +32,7 @@ from app.core.errors import (
 )
 from app.models.approval import ApprovalAction, ApprovalRecord
 from app.models.content import ContentItem, ContentStatus, ContentVersion
+from app.services.flow_approval import FlowGenerationBinding, flow_binding_columns
 from app.models.creative import CreativeAsset
 
 F = ContentStatus
@@ -284,6 +285,7 @@ class ApprovalService:
         idempotency_key: str | None = None,
         requested_version_id: uuid.UUID | None = None,
         metadata: dict[str, Any] | None = None,
+        flow_binding: Any | None = None,
     ) -> tuple[ContentItem, ApprovalRecord | None, bool]:
         """Apply ``action`` and return ``(item, record, was_replay)``."""
         item = await self.get_item(item_id)
@@ -374,6 +376,7 @@ class ApprovalService:
                 ),
                 creative_asset_version=creative["asset_version"] or None,
                 creative_binding_hash=creative["hash"],
+                **(flow_binding_columns(flow_binding) if flow_binding else {}),
             )
             self.session.add(record)
             if persisted_action == ApprovalAction.APPROVE.value:

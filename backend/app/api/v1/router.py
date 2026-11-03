@@ -15,6 +15,7 @@ from app.api.v1 import (
     content_studio,
     creative,
     creative_studio,
+    flow,
     director,
     research,
     social,
@@ -30,6 +31,7 @@ api_router.include_router(content.router)
 api_router.include_router(content_studio.router)
 api_router.include_router(creative.router)
 api_router.include_router(creative_studio.router)
+api_router.include_router(flow.router)
 api_router.include_router(director.router)
 api_router.include_router(agents.router)
 api_router.include_router(social.router)

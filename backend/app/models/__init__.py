@@ -28,6 +28,7 @@ from app.models.creative import (
 )
 from app.models.creative_brief import CreativeBrief
 from app.models.creative_job import CreativeGenerationJob
+from app.models.flow import FlowAssetExport, FlowCompanionSession
 from app.models.idempotency import IdempotencyKey
 from app.models.memory import MarketingMemory, MemoryKind
 from app.models.research import (

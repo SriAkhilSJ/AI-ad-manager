@@ -371,7 +371,7 @@ $ cd backend && pytest tests/ -q
 | --- | --- | --- | --- |
 | 1 | Correct provider selection | 2 | `router.resolve("strategy","strategic_decision").provider == "velona"` |
 | 2 | Correct endpoint selection | 4 | `recorder.urls == ["https://api.velona.example/v1/chat/completions"]`; OpenRouter URL is configurable, not hardcoded |
-| 3 | Correct credential isolation | 4 | Velona request carries `Bearer velona-test-key…` and **not** the OpenRouter key, and vice versa |
+| 3 | Correct credential isolation | 4 | Velona request carries `Bearer <fixture-key>` and **not** the OpenRouter key, and vice versa |
 | 4 | Incorrect endpoint rejection | 8 | `ftp://`, `javascript:`, embedded credentials, query strings, remote plain-HTTP |
 | 5 | Missing credentials fail safely | 4 | zero requests recorded; error names `VELONA_API_KEY` and contains no key value |
 | 6 | HTTPS enforcement | 9 | 3 remote `http://` rejected; 3 loopback accepted; loopback can be forbidden |

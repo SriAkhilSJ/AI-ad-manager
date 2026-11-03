@@ -1,6 +1,7 @@
 # Phase 2.6 — Fail-Closed Budget Safety
 
 **Status:** COMPLETE
+**Commit:** `cbf212c` (implementation); this line was added in a follow-up docs commit.
 **Scope:** `BudgetGuard` semantics, atomic cost reservations, pricing trust, cost observability.
 **Out of scope and untouched:** Phase 3, social publishing, Google Flow, live provider calls, provider credential isolation, approval enforcement.
 

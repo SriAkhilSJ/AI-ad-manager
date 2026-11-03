@@ -14,7 +14,9 @@ from app.api.v1 import (
     content,
     creative,
     director,
+    research,
     social,
+    strategy,
 )
 
 api_router = APIRouter(dependencies=[Depends(rate_limit)])
@@ -28,5 +30,8 @@ api_router.include_router(director.router)
 api_router.include_router(agents.router)
 api_router.include_router(social.router)
 api_router.include_router(analytics.router)
+api_router.include_router(research.router)
+api_router.include_router(strategy.router)
+api_router.include_router(strategy.director_router)
 
 __all__ = ["api_router"]

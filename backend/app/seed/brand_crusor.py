@@ -149,6 +149,336 @@ CRUSOR_PILLARS: list[dict[str, Any]] = [
 ]
 
 
+
+# --------------------------------------------------------------------------- #
+# Phase 2: structured knowledge base
+#
+# The overriding rule for every row below: if the founder did not state it, it is
+# stored as unverified with a note asking for confirmation. Nothing here asserts
+# a feature, price, integration, benchmark or testimonial that was not provided.
+# The only *verified* facts are the four given in the brief.
+# --------------------------------------------------------------------------- #
+
+# Given facts. Each carries the source the founder supplied.
+CRUSOR_PRODUCT_FACTS: list[dict[str, Any]] = [
+    {
+        "category": "identity",
+        "statement": "Crusor AI is an AI-powered IDE.",
+        "detail": "Stated in the product brief.",
+        "source_url": "https://crusor.in",
+        "verification_status": "verified",
+        "is_public": True,
+        "dedupe_key": "fact-identity-ai-ide",
+    },
+    {
+        "category": "tagline",
+        "statement": "The product tagline is \"Build and Ship with Ease.\"",
+        "detail": "Use verbatim; do not embellish.",
+        "source_url": "https://crusor.in",
+        "verification_status": "verified",
+        "is_public": True,
+        "dedupe_key": "fact-tagline-build-and-ship",
+    },
+    {
+        "category": "website",
+        "statement": "The product website is https://crusor.in.",
+        "detail": "The only confirmed public URL.",
+        "source_url": "https://crusor.in",
+        "verification_status": "verified",
+        "is_public": True,
+        "dedupe_key": "fact-website-crusor-in",
+    },
+    {
+        "category": "positioning",
+        "statement": (
+            "Crusor AI is positioned as an AI-powered development environment that helps "
+            "developers build and ship software more efficiently."
+        ),
+        "detail": "Founder-stated positioning.",
+        "source_url": "https://crusor.in",
+        "verification_status": "verified",
+        "is_public": True,
+        "dedupe_key": "fact-positioning-ai-dev-env",
+    },
+    # --- explicitly unknown: surfaced for founder confirmation -----------------
+    {
+        "category": "pricing",
+        "statement": "Pricing and plan tiers are not documented in this knowledge base.",
+        "detail": (
+            "UNCONFIRMED. The brief provided no pricing information. Do not state or "
+            "imply a price, free tier, trial length or discount until the founder "
+            "confirms it here."
+        ),
+        "verification_status": "needs_confirmation",
+        "is_public": False,
+        "dedupe_key": "fact-unknown-pricing",
+    },
+    {
+        "category": "integrations",
+        "statement": "Supported integrations and languages are not documented.",
+        "detail": (
+            "UNCONFIRMED. No integration, language, framework or model-provider support "
+            "has been confirmed. Any such claim would be fabricated."
+        ),
+        "verification_status": "needs_confirmation",
+        "is_public": False,
+        "dedupe_key": "fact-unknown-integrations",
+    },
+    {
+        "category": "capability",
+        "statement": "Individual product capabilities are not documented.",
+        "detail": (
+            "UNCONFIRMED. Beyond 'AI-powered IDE', specific features (autocomplete, "
+            "agents, refactors, review tooling) are unspecified. Confirm each before "
+            "it appears in marketing."
+        ),
+        "verification_status": "needs_confirmation",
+        "is_public": False,
+        "dedupe_key": "fact-unknown-capabilities",
+    },
+    {
+        "category": "performance",
+        "statement": "No performance or productivity benchmark has been established.",
+        "detail": (
+            "UNCONFIRMED. Do not publish speed, latency, token or productivity claims "
+            "such as '10x faster'. No measurement exists."
+        ),
+        "verification_status": "needs_confirmation",
+        "is_public": False,
+        "dedupe_key": "fact-unknown-performance",
+    },
+    {
+        "category": "social_proof",
+        "statement": "No customer count, testimonial or case study is available.",
+        "detail": (
+            "UNCONFIRMED. Do not use 'trusted by', user counts, logos or testimonials "
+            "until the founder supplies verifiable ones."
+        ),
+        "verification_status": "needs_confirmation",
+        "is_public": False,
+        "dedupe_key": "fact-unknown-social-proof",
+    },
+    {
+        "category": "availability",
+        "statement": "Platform availability (desktop, web, extensions) is not documented.",
+        "detail": "UNCONFIRMED. Confirm where the IDE actually runs before saying so.",
+        "verification_status": "needs_confirmation",
+        "is_public": False,
+        "dedupe_key": "fact-unknown-availability",
+    },
+]
+
+# The five audiences from the brief, with motivations kept deliberately minimal.
+CRUSOR_AUDIENCE_SEGMENTS: list[dict[str, Any]] = [
+    {
+        "name": "Students and engineering students",
+        "description": "Learners building projects, portfolios and coursework.",
+        "motivations": ["learn by building", "produce portfolio work"],
+        "channels": ["linkedin", "youtube", "reddit"],
+        "priority": 3,
+        "source": "founder brief",
+        "verification_status": "needs_confirmation",
+    },
+    {
+        "name": "Software developers",
+        "description": "Working developers shipping production code.",
+        "motivations": ["ship software faster", "reduce tooling overhead"],
+        "channels": ["linkedin", "x", "reddit"],
+        "priority": 1,
+        "source": "founder brief",
+        "verification_status": "needs_confirmation",
+    },
+    {
+        "name": "Indie hackers",
+        "description": "Solo builders shipping products end to end.",
+        "motivations": ["ship alone", "minimise overhead"],
+        "channels": ["x", "reddit", "linkedin"],
+        "priority": 2,
+        "source": "founder brief",
+        "verification_status": "needs_confirmation",
+    },
+    {
+        "name": "Startup founders",
+        "description": "Founders building with small engineering teams.",
+        "motivations": ["move fast with a small team", "reduce engineering cost"],
+        "channels": ["linkedin", "x"],
+        "priority": 3,
+        "source": "founder brief",
+        "verification_status": "needs_confirmation",
+    },
+    {
+        "name": "AI enthusiasts",
+        "description": "Developers following AI tooling closely.",
+        "motivations": ["explore new AI tooling", "stay current"],
+        "channels": ["x", "reddit", "youtube"],
+        "priority": 4,
+        "source": "founder brief",
+        "verification_status": "needs_confirmation",
+    },
+]
+
+# Competitors are seeded by NAME ONLY. No positioning, pricing or capability is
+# asserted, because none was provided and inventing it would be fabrication.
+CRUSOR_COMPETITORS: list[dict[str, Any]] = [
+    {
+        "name": "Cursor",
+        "website": None,
+        "positioning": "",
+        "strengths": [],
+        "weaknesses": [],
+        "source": "founder brief (name only)",
+    },
+    {
+        "name": "GitHub Copilot",
+        "website": None,
+        "positioning": "",
+        "strengths": [],
+        "weaknesses": [],
+        "source": "founder brief (name only)",
+    },
+    {
+        "name": "Windsurf",
+        "website": None,
+        "positioning": "",
+        "strengths": [],
+        "weaknesses": [],
+        "source": "founder brief (name only)",
+    },
+    {
+        "name": "VS Code with AI extensions",
+        "website": None,
+        "positioning": "",
+        "strengths": [],
+        "weaknesses": [],
+        "source": "founder brief (name only; indirect alternative)",
+    },
+]
+
+# The five business objectives from the brief, in priority order.
+CRUSOR_MARKETING_OBJECTIVES: list[dict[str, Any]] = [
+    {
+        "objective_type": "developer_acquisition",
+        "statement": "Acquire developers who try the product and start building.",
+        "priority": 1,
+        "horizon": "quarter",
+        "primary_metric": "signup_starts",
+    },
+    {
+        "objective_type": "waitlist_registrations",
+        "statement": "Convert interested developers into waitlist registrations.",
+        "priority": 2,
+        "horizon": "quarter",
+        "primary_metric": "waitlist_registrations",
+    },
+    {
+        "objective_type": "product_adoption",
+        "statement": "Move new developers to a first completed project.",
+        "priority": 3,
+        "horizon": "quarter",
+        "primary_metric": "activation_rate",
+    },
+    {
+        "objective_type": "community_growth",
+        "statement": "Build a developer community that asks and answers real questions.",
+        "priority": 4,
+        "horizon": "quarter",
+        "primary_metric": "qualified_developer_conversations",
+    },
+    {
+        "objective_type": "brand_awareness",
+        "statement": "Make Crusor AI known to the target developer audiences.",
+        "priority": 5,
+        "horizon": "quarter",
+        "primary_metric": "assisted signup_starts",
+    },
+]
+
+
+async def seed_knowledge_base(brand: BrandProfile) -> dict[str, int]:
+    """Seed the Phase 2 knowledge base for an existing brand.
+
+    Idempotent: re-running does not duplicate rows (dedupe keys are enforced).
+    """
+    from app.models.research import (
+        AudienceSegment,
+        MarketingObjective,
+        ProductFact,
+    )
+
+    counts = {"facts": 0, "segments": 0, "competitors": 0, "objectives": 0}
+    async with session_scope() as session:
+        existing_facts = {
+            row
+            for row in (
+                await session.execute(
+                    select(ProductFact.dedupe_key).where(
+                        ProductFact.brand_profile_id == brand.id
+                    )
+                )
+            ).scalars().all()
+        }
+        for fact in CRUSOR_PRODUCT_FACTS:
+            if fact["dedupe_key"] in existing_facts:
+                continue
+            session.add(ProductFact(brand_profile_id=brand.id, **fact))
+            counts["facts"] += 1
+
+        existing_segments = {
+            row
+            for row in (
+                await session.execute(
+                    select(AudienceSegment.name).where(
+                        AudienceSegment.brand_profile_id == brand.id
+                    )
+                )
+            ).scalars().all()
+        }
+        for segment in CRUSOR_AUDIENCE_SEGMENTS:
+            if segment["name"] in existing_segments:
+                continue
+            session.add(AudienceSegment(brand_profile_id=brand.id, **segment))
+            counts["segments"] += 1
+
+        from app.models.brand import CompetitorProfile
+
+        existing_competitors = {
+            row
+            for row in (
+                await session.execute(
+                    select(CompetitorProfile.name).where(
+                        CompetitorProfile.brand_profile_id == brand.id
+                    )
+                )
+            ).scalars().all()
+        }
+        for competitor in CRUSOR_COMPETITORS:
+            if competitor["name"] in existing_competitors:
+                continue
+            session.add(CompetitorProfile(brand_profile_id=brand.id, **competitor))
+            counts["competitors"] += 1
+
+        existing_objectives = {
+            row
+            for row in (
+                await session.execute(
+                    select(MarketingObjective.objective_type).where(
+                        MarketingObjective.brand_profile_id == brand.id
+                    )
+                )
+            ).scalars().all()
+        }
+        for objective in CRUSOR_MARKETING_OBJECTIVES:
+            if objective["objective_type"] in existing_objectives:
+                continue
+            session.add(MarketingObjective(brand_profile_id=brand.id, **objective))
+            counts["objectives"] += 1
+
+        await session.flush()
+        logger.info("knowledge_base_seeded", brand_id=str(brand.id), **counts)
+
+    return counts
+
+
 async def seed(replace: bool = False) -> BrandProfile:
     async with session_scope() as session:
         existing = (
@@ -179,7 +509,9 @@ async def seed(replace: bool = False) -> BrandProfile:
             session.add(ContentPillar(brand_profile_id=brand.id, **pillar))
         await session.flush()
         logger.info("brand_seeded", brand_id=str(brand.id), pillars=len(CRUSOR_PILLARS))
-        return brand
+
+    await seed_knowledge_base(brand)
+    return brand
 
 
 def main(argv: list[str] | None = None) -> int:

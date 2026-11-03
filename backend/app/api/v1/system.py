@@ -18,6 +18,7 @@ from app.core.config import get_settings
 from app.director.graph import graph_topology
 from app.llm.gateway import gateway_status
 from app.models.user import User
+from app.research.base import research_status
 from app.storage.base import storage_status
 from app.tasks.dispatcher import dispatcher_status
 
@@ -59,6 +60,7 @@ async def status(session: DB) -> dict[str, Any]:
 
     llm = gateway_status(settings)
     storage = storage_status(settings)
+    research = research_status(settings)
     tasks = dispatcher_status(settings)
 
     def classify(available: bool, configured: bool) -> Literal["available", "degraded", "unavailable"]:
@@ -70,7 +72,7 @@ async def status(session: DB) -> dict[str, Any]:
         "app": {
             "name": settings.app_name,
             "environment": settings.environment,
-            "version": "1.0.0-phase1",
+            "version": "1.1.0-phase2",
             "api_prefix": settings.api_v1_prefix,
             "uptime_seconds": round(time.time() - START_TIME, 1),
             "bootstrap_required": user_count == 0,
@@ -95,6 +97,25 @@ async def status(session: DB) -> dict[str, Any]:
         },
         "tasks": tasks,
         "storage": storage,
+        "research": research,
+        "strategy": {
+            "status": "available",
+            "budget_usd": settings.strategy_budget_usd,
+            "budget_inr_equivalent": round(
+                settings.strategy_budget_usd * settings.usd_inr_rate, 2
+            ),
+            "max_iterations": settings.strategy_max_iterations,
+            "models": {
+                "reasoning": settings.llm_reasoning_model,
+                "auxiliary": settings.llm_auxiliary_model,
+            },
+            "price_verified": bool(llm["routing"].get("unverified_models") == []),
+            "unverified_models": llm["routing"].get("unverified_models", []),
+            "note": (
+                "Strategy generation is available and produces founder-approvable drafts. "
+                "Nothing is published, sent, spent or applied to a live account."
+            ),
+        },
         "publishing": {
             "status": "unavailable",
             "mode": "human_approval_required",

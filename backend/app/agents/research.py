@@ -348,6 +348,7 @@ class ResearchAgent(BaseAgent[ResearchInput, ResearchOutput]):
                 limits=guard.snapshot(),
             )
 
+        project.provider = provider.name
         await service.mark_running(project)
 
         try:

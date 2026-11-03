@@ -285,12 +285,16 @@ def build_providers(
     mine for another vendor's key. There is no cross-provider fallback: the
     returned dict is a lookup table, and a miss raises rather than substituting.
     """
-    return {
-        p.name: p
-        for p in (
-            OpenAIProvider(settings),
-            AnthropicProvider(settings),
-            OpenRouterProvider(settings, transport=transport),
-            VelonaProvider(settings, transport=transport),
-        )
-    }
+    providers: list[LLMProvider] = [
+        OpenAIProvider(settings),
+        AnthropicProvider(settings),
+        OpenRouterProvider(settings, transport=transport),
+        VelonaProvider(settings, transport=transport),
+    ]
+    if getattr(settings, "content_provider", "mock") == "mock":
+        # Phase 3A: a deterministic, free, self-identifying provider so content
+        # generation is demonstrable without credentials or spend.
+        from app.llm.mock_content import build_mock_provider
+
+        providers.append(build_mock_provider())
+    return {p.name: p for p in providers}

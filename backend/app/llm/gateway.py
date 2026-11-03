@@ -247,7 +247,24 @@ class LLMGateway:
         if cancel is not None:
             cancel.check()
 
-        route = self.router.resolve(agent_name, task_class)
+        # Phase 3A content pin, resolved *before* normal routing so content works
+        # with no LLM provider configured at all — which is the Phase 3A default.
+        # It only applies when this gateway actually holds the mock provider, so a
+        # vendor-only gateway keeps its normal routing.
+        if (
+            agent_name == "content"
+            and getattr(self.settings, "content_provider", "mock") == "mock"
+            and "mock" in self.providers
+        ):
+            route = Route(
+                provider="mock",
+                model="mock-content-v1",
+                tier=tier_for_task(task_class),
+                task_class=task_class,
+                source="content_provider_mock",
+            )
+        else:
+            route = self.router.resolve(agent_name, task_class)
         provider = self.providers.get(route.provider)
         if provider is None:
             # No silent substitution: an unknown provider is a hard failure, not a
@@ -289,6 +306,13 @@ class LLMGateway:
             task_class=task_class,
             settings=self.settings,
         )
+        # Phase 3A: a provider that cannot charge (the mock) makes this request
+        # non-billable. It reserves no money and is exempt from the cost and
+        # pricing-trust gates, but token and tool-call limits still apply.
+        if getattr(provider, "is_billable", True) is False:
+            estimate.billable = False
+            estimate.estimated_cost_usd = 0.0
+            estimate.price_verified = False
 
         # ---- budget: reserve atomically, before anything is spent ------
         # Phase 2.6: claim the estimated cost up front so two concurrent calls

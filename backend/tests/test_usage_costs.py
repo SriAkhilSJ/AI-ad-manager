@@ -144,14 +144,27 @@ async def test_gateway_records_usage_once_per_attempt(session):
 
 
 async def test_provider_unavailable_when_not_configured(session):
+    """No silent substitution: an unconfigured gateway raises a typed error.
+
+    Phase 3A change: the *content* agent is served by the free, self-identifying
+    mock provider by default (``CONTENT_PROVIDER=mock``), so it is no longer a
+    valid subject for this assertion. The guarantee is checked with an agent that
+    has no such default, and again for content with the mock switched off.
+    """
     from app.llm.base import LLMRequest
 
-    gateway = LLMGateway(session=session)
     request = LLMRequest(
         system_prompt="s", user_prompt="u", schema_name="x", json_schema={}, max_tokens=10
     )
+    gateway = LLMGateway(session=session)
     with pytest.raises(ProviderUnavailable):
-        await gateway.structured(agent_name="content", request=request)
+        await gateway.structured(agent_name="research", request=request)
+
+    from app.core.config import Settings
+
+    no_mock = LLMGateway(session=session, settings=Settings(environment="test", content_provider="auto"))
+    with pytest.raises(ProviderUnavailable):
+        await no_mock.structured(agent_name="content", request=request)
 
 
 async def test_monthly_budget_is_enforced(session):

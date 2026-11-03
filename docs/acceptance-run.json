@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-11-03T09:37:50Z",
+  "generated_at": "2026-11-03T11:16:29Z",
   "base_url": "http://127.0.0.1:8000",
-  "passed": 23,
-  "total": 23,
+  "passed": 36,
+  "total": 36,
   "criteria": [
     {
       "criterion": "1. Backend starts",
       "passed": true,
-      "detail": "liveness 200 (uptime 2.5s); /system/status reachable pre-auth -> 200"
+      "detail": "liveness 200 (uptime 1183.8s); /system/status reachable pre-auth -> 200"
     },
     {
       "criterion": "1b. /system/status reports every integration honestly",
       "passed": true,
-      "detail": "sections=11; publishing=unavailable/human_approval_required; storage=local; llm=degraded"
+      "detail": "sections=11; publishing=unavailable/human_approval_required; storage=local; llm=available"
     },
     {
       "criterion": "2. Frontend builds and serves a real SPA",
       "passed": true,
-      "detail": "dist build present: 1 bundle(s), index-B4TmxVNb.js"
+      "detail": "dist build present: 1 bundle(s), index-DBCqpiXF.js"
     },
     {
       "criterion": "3. Migrations execute against the live database",
       "passed": true,
-      "detail": "alembic current -> 60ed69ffc987 (head)"
+      "detail": "alembic current -> 7c1f9a2d4e83 (head)"
     },
     {
       "criterion": "4. Brand profile create + retrieve",
@@ -32,22 +32,22 @@
     {
       "criterion": "5. Director initialises a stateful workflow",
       "passed": true,
-      "detail": "15 nodes, interrupt at human_approval; workflow wf_2b7da4390650475c produced 3 drafts in 8 iterations and is awaiting approval"
+      "detail": "15 nodes, interrupt at human_approval; workflow wf_28a16a16deec4db2 produced 3 drafts in 8 iterations and is awaiting approval"
     },
     {
       "criterion": "6. All six agents invocable through structured interfaces",
       "passed": true,
-      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run fa0b2310\u2026, 3 trace events)"
+      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run d581c525\u2026, 3 trace events)"
     },
     {
       "criterion": "7. Workflow state persists across restarts",
       "passed": true,
-      "detail": "a fresh process reconstructed thread wf_2b7da4390650475c: 23 checkpoints, identical plan and content ids"
+      "detail": "a fresh process reconstructed thread wf_28a16a16deec4db2: 23 checkpoints, identical plan and content ids"
     },
     {
       "criterion": "8. Content create + immutable version history",
       "passed": true,
-      "detail": "content f691cc6b\u2026 now at v2 with distinct content hashes"
+      "detail": "content f5f7f41c\u2026 now at v2 with distinct content hashes"
     },
     {
       "criterion": "9. Approval state machine + invalidation on edit",
@@ -62,12 +62,12 @@
     {
       "criterion": "11. Model usage and cost are recordable",
       "passed": true,
-      "detail": "usage ledger 11200 -> 12800 tokens, $0.0294 -> $0.0336 across 1 provider row(s)"
+      "detail": "usage ledger 37201 -> 38801 tokens, $0.0420 -> $0.0462 across 2 provider row(s)"
     },
     {
       "criterion": "12. Automated test suite passes",
       "passed": true,
-      "detail": "464 tests, 0 failures, 0 errors"
+      "detail": "549 tests, 0 failures, 0 errors"
     },
     {
       "criterion": "13. Architecture documentation is complete",
@@ -87,7 +87,7 @@
     {
       "criterion": "16. Phase 2 schema is migrated (not create_all)",
       "passed": true,
-      "detail": "2 migrations cover 11 Phase 2 tables incl. the verified-source CHECK"
+      "detail": "3 migrations cover 11 Phase 2 tables incl. the verified-source CHECK"
     },
     {
       "criterion": "17. Strategy generation works",
@@ -102,7 +102,7 @@
     {
       "criterion": "19. Director orchestrates agents and gates on approval",
       "passed": true,
-      "detail": "workflow strat_c5201aa0c30245c7: 7 trace entries (reused 270 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
+      "detail": "workflow strat_dac90afe8e6b4948: 7 trace entries (reused 414 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
     },
     {
       "criterion": "20. Usage, cost and budget enforcement",
@@ -118,6 +118,71 @@
       "criterion": "22. Phase 2 never publishes, sends or spends",
       "passed": true,
       "detail": "5 publish/execute/apply paths absent; execution-status scopes approval to planning; /system/status still reports publishing unavailable"
+    },
+    {
+      "criterion": "23. Weekly content plan is created for a campaign",
+      "passed": true,
+      "detail": "201 plan 2026-11-09 with 6 slots across ['facebook', 'instagram', 'linkedin', 'reddit', 'x', 'youtube'] and 4 content types; generated_by=mock"
+    },
+    {
+      "criterion": "24. Drafts are platform-specific and campaign-linked",
+      "passed": true,
+      "detail": "6 drafts linked to campaign 04094626-1320-40d1-9f24-fabed655795b: linkedin/social_post 213ch, x/social_post 46ch, instagram/caption 163ch, youtube/short_form_video_script 324ch, facebook/social_post 185ch, reddit/community_discussion 406ch"
+    },
+    {
+      "criterion": "25. Brand Guardian validates drafts",
+      "passed": true,
+      "detail": "verdict PASS after 18 rules; 2 validation row(s) persisted for version 3d5eaac6"
+    },
+    {
+      "criterion": "26. Unsupported claims are blocked",
+      "passed": true,
+      "detail": "v2 verdict BLOCKED with 4 blocking issue(s) in ['source_evidence', 'unsupported_testimonial', 'unverified_statistic']; submit -> 409"
+    },
+    {
+      "criterion": "27. Editing creates a new version",
+      "passed": true,
+      "detail": "v1 -> v2; original version 3d5eaac6 unchanged"
+    },
+    {
+      "criterion": "28. Approval is version-bound and edits invalidate it",
+      "passed": true,
+      "detail": "approval bound to version e11e0ea6; editing invalidated it while keeping 2 approval record(s) and the approved text intact"
+    },
+    {
+      "criterion": "29. Internal calendar can be updated",
+      "passed": true,
+      "detail": "entry moved to 2026-11-16 10:15 (label planned); calendar reports external_scheduling=false"
+    },
+    {
+      "criterion": "30. Publishing is unavailable",
+      "passed": true,
+      "detail": "4 studio publish/schedule paths absent; capabilities report external_publishing=false and external_scheduling=false"
+    },
+    {
+      "criterion": "31. Zero budget blocks paid providers",
+      "passed": true,
+      "detail": "mock served at zero budget (cost 0.0); paid agents rejected with ['BudgetExceeded', 'BudgetExceeded']; deepseek-v4.1-flash still billable at $0.020000/1k+1k"
+    },
+    {
+      "criterion": "32. Mock generation is clearly attributed",
+      "passed": true,
+      "detail": "capabilities provider=mock live_model_calls_enabled=false; plan generated_by=mock model=mock-content-v1; variants is_mock=true"
+    },
+    {
+      "criterion": "33. Variants are compared and preserved",
+      "passed": true,
+      "detail": "2 distinct variants; selecting index 1 produced v2 with that exact body"
+    },
+    {
+      "criterion": "34. Generation is idempotent",
+      "passed": true,
+      "detail": "plan retry returned plan 387591ed with 6 slots; generate retry returned item 7203e01f"
+    },
+    {
+      "criterion": "35. Phase 1 and Phase 2 acceptance is intact",
+      "passed": true,
+      "detail": "all 23 Phase 1/2 checks still pass alongside the Phase 3A criteria; studio overview reports 87 drafts"
     }
   ]
 }

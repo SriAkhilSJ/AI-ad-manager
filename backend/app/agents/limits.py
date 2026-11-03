@@ -72,6 +72,21 @@ class ExecutionLimits:
         )
 
     @classmethod
+    def for_content(cls, settings: Any) -> "ExecutionLimits":
+        """Bounds for one weekly content plan (Phase 3A)."""
+        return cls(
+            max_iterations=int(getattr(settings, "content_max_slots", 12)),
+            max_tool_calls=int(getattr(settings, "content_max_tool_calls", 40)),
+            max_wall_seconds=int(getattr(settings, "content_max_wall_seconds", 300)),
+            max_cost_usd=float(getattr(settings, "content_budget_usd", 0.06)),
+            max_tokens=int(getattr(settings, "content_max_tokens", 40_000)),
+            label="content",
+            allow_unknown_pricing=bool(
+                getattr(settings, "llm_allow_unverified_pricing", False)
+            ),
+        )
+
+    @classmethod
     def for_strategy(cls, settings: Any) -> "ExecutionLimits":
         return cls(
             max_iterations=settings.strategy_max_iterations,

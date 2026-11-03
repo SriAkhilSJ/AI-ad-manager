@@ -27,6 +27,18 @@ import type {
   GraphTopology,
   MarketingGoal,
   PlatformStatus,
+  PlatformSpec,
+  StudioCapabilities,
+  StudioOverview,
+  GenerateRequest,
+  GeneratedItem,
+  ContentPlan,
+  ContentPlanDetail,
+  PlanRequest,
+  VariantSet,
+  ValidationResult,
+  CalendarView,
+  CalendarEntry,
   PublishedPost,
   ResearchCapabilities,
   ResearchFinding,
@@ -318,6 +330,71 @@ export const contentApi = {
     }>(`/content/${id}/publish`, { method: 'POST', body: payload, idempotencyKey }),
   publications: (id: string) => request<PublishedPost[]>(`/content/${id}/publications`),
   cancel: (id: string) => request<void>(`/content/${id}`, { method: 'DELETE' }),
+}
+
+
+// ---------------------------------------------------------- content studio
+export const contentStudioApi = {
+  platforms: () => request<PlatformSpec[]>('/content-studio/platforms'),
+  capabilities: () => request<StudioCapabilities>('/content-studio/capabilities'),
+  overview: () => request<StudioOverview>('/content-studio/overview'),
+  generate: (payload: GenerateRequest, idempotencyKey?: string) =>
+    request<GeneratedItem>('/content-studio/generate', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey,
+    }),
+  plans: (query?: { campaign_id?: string; limit?: number }) =>
+    request<ContentPlan[]>('/content-studio/plans', { query }),
+  plan: (id: string) => request<ContentPlanDetail>(`/content-studio/plans/${id}`),
+  createPlan: (payload: PlanRequest, idempotencyKey?: string) =>
+    request<ContentPlanDetail>('/content-studio/plans', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey,
+    }),
+  generatePlan: (id: string, force = false, idempotencyKey?: string) =>
+    request<ContentPlanDetail>(`/content-studio/plans/${id}/generate`, {
+      method: 'POST',
+      query: { force },
+      idempotencyKey,
+    }),
+  variants: (itemId: string) => request<VariantSet>(`/content-studio/items/${itemId}/variants`),
+  regenerateVariants: (itemId: string, variants = 2, changeNote?: string) =>
+    request<VariantSet & { approvals_invalidated: number; note: string }>(
+      `/content-studio/items/${itemId}/variants/regenerate`,
+      { method: 'POST', body: { variants, change_note: changeNote ?? '' } },
+    ),
+  selectVariant: (itemId: string, variantIndex: number, changeNote?: string) =>
+    request<{
+      content_item_id: string
+      version_id: string
+      version_number: number
+      selected_variant: number
+      status: string
+      approval_invalidated: boolean
+    }>(`/content-studio/items/${itemId}/variants/select`, {
+      method: 'POST',
+      body: { variant_index: variantIndex, change_note: changeNote ?? '' },
+    }),
+  validate: (itemId: string) =>
+    request<ValidationResult>(`/content-studio/items/${itemId}/validate`, { method: 'POST' }),
+  validations: (itemId: string) =>
+    request<ValidationResult[]>(`/content-studio/items/${itemId}/validations`),
+  calendar: (query?: {
+    view?: 'month' | 'week' | 'list'
+    anchor?: string
+    platform?: string
+    campaign_id?: string
+  }) => request<CalendarView>('/content-studio/calendar', { query }),
+  moveCalendar: (
+    itemId: string,
+    payload: { planned_date?: string; planned_time?: string; note?: string },
+  ) =>
+    request<CalendarEntry>(`/content-studio/calendar/${itemId}`, {
+      method: 'PATCH',
+      body: payload,
+    }),
 }
 
 // --------------------------------------------------------------- creative

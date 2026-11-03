@@ -14,6 +14,8 @@ them, which keeps the dependency graph acyclic and auditable.
 
 from __future__ import annotations
 
+import traceback
+
 import asyncio
 import time
 import uuid
@@ -306,6 +308,14 @@ class BaseAgent(Generic[InputT, OutputT]):
             if isinstance(exc, CancelledProblem):
                 raise
             logger.warning("llm_call_failed", agent=self.name, error=type(exc).__name__)
+            # Keep the traceback available for operators without surfacing it to
+            # callers: a degraded call silently falling back to deterministic copy
+            # is exactly the case that needs a stack to diagnose.
+            logger.debug(
+                "llm_call_traceback",
+                agent=self.name,
+                traceback=traceback.format_exc(limit=8),
+            )
             return schema.model_construct(), False
 
         ctx.tokens_used += response.total_tokens

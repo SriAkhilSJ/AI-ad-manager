@@ -33,6 +33,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/research', label: 'Research Centre', icon: IconResearch },
   { to: '/strategy', label: 'Strategy Studio', icon: IconStrategy },
   { to: '/campaigns', label: 'Campaigns', icon: IconCampaign },
+  { to: '/content-studio', label: 'Content Studio', icon: IconStudio },
   { to: '/calendar', label: 'Content Calendar', icon: IconCalendar },
   { to: '/creative', label: 'Creative Studio', icon: IconStudio },
   { to: '/approvals', label: 'Approval Centre', icon: IconApproval },

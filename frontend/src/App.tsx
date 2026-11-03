@@ -12,6 +12,8 @@ import { StrategyDirectorPage } from './pages/StrategyDirector'
 import { CampaignsPage } from './pages/Campaigns'
 import { CampaignDetailPage } from './pages/CampaignDetail'
 import { ContentCalendarPage } from './pages/ContentCalendar'
+import { ContentStudioPage } from './pages/ContentStudio'
+import { ContentDraftEditorPage } from './pages/ContentDraftEditor'
 import { ContentDetailPage } from './pages/ContentDetail'
 import { CreativeStudioPage } from './pages/CreativeStudio'
 import { ApprovalCentrePage } from './pages/ApprovalCentre'
@@ -76,6 +78,8 @@ export default function App() {
         <Route path="campaigns" element={<CampaignsPage />} />
         <Route path="campaigns/:id" element={<CampaignDetailPage />} />
         <Route path="calendar" element={<ContentCalendarPage />} />
+        <Route path="content-studio" element={<ContentStudioPage />} />
+        <Route path="content-studio/items/:id" element={<ContentDraftEditorPage />} />
         <Route path="content/:id" element={<ContentDetailPage />} />
         <Route path="creative" element={<CreativeStudioPage />} />
         <Route path="approvals" element={<ApprovalCentrePage />} />

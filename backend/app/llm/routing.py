@@ -133,6 +133,10 @@ class CostEstimate:
     output_per_1k: float
     estimated_cost_usd: float
     price_verified: bool
+    #: False only for providers that cannot charge (the Phase 3A mock). A
+    #: non-billable request is exempt from the cost, pricing-trust and zero-budget
+    #: gates, because no money can move; token and tool-call limits still apply.
+    billable: bool = True
     currency_note: str = "estimated from list price; actual cost is recorded from provider usage"
 
     @property
@@ -451,7 +455,8 @@ class BudgetGuard:
         from app.llm.base import BudgetExceeded
 
         claim = token_id or f"res-{_uuid.uuid4().hex[:16]}"
-        amount = float(estimate.estimated_cost_usd)
+        # A non-billable provider reserves nothing: there is no money to hold.
+        amount = float(estimate.estimated_cost_usd) if estimate.billable else 0.0
 
         with self._lock:
             # --- token ceiling first (cheap, no state) -----------------
@@ -475,8 +480,11 @@ class BudgetGuard:
 
             # --- pricing trust -----------------------------------------
             # A caller that supplies its own ceiling has no provider price to
-            # verify, so the rule does not apply to it (see CostEstimate).
+            # verify, and a non-billable provider cannot charge, so neither is
+            # subject to the pricing-trust rule.
             if (
+                estimate.billable
+                and
                 estimate.provider not in _PRICELESS_PROVIDERS
                 and not self.pricing_trusted
                 and not self.allow_unknown_pricing
@@ -491,7 +499,8 @@ class BudgetGuard:
                 raise BudgetExceeded(self.stopped_reason)
 
             # --- cost ceiling ------------------------------------------
-            if self.max_cost_usd == 0:
+            # Skipped for non-billable providers: a free request cannot spend.
+            if estimate.billable and self.max_cost_usd == 0:
                 self.stopped_reason = (
                     f"cost budget is zero for '{self.label}': every paid request is "
                     f"blocked (request estimated ${amount:.6f})"
@@ -499,7 +508,7 @@ class BudgetGuard:
                 self._note_rejection("zero_budget", self.stopped_reason, estimate)
                 raise BudgetExceeded(self.stopped_reason)
 
-            if self.max_cost_usd != UNLIMITED:
+            if estimate.billable and self.max_cost_usd != UNLIMITED:
                 available = self.max_cost_usd - self._spent_usd - self._reserved_usd
                 if amount > available + 1e-12:
                     self.stopped_reason = (
@@ -617,7 +626,8 @@ class BudgetGuard:
             raise BudgetExceeded(self.stopped_reason)
 
         if (
-            estimate.provider not in _PRICELESS_PROVIDERS
+            estimate.billable
+            and estimate.provider not in _PRICELESS_PROVIDERS
             and not self.pricing_trusted
             and not self.allow_unknown_pricing
         ):
@@ -627,14 +637,18 @@ class BudgetGuard:
             self._note_rejection("untrusted_pricing", self.stopped_reason, estimate)
             raise BudgetExceeded(self.stopped_reason)
 
-        if self.max_cost_usd == 0:
+        if estimate.billable and self.max_cost_usd == 0:
             self.stopped_reason = (
                 f"cost budget is zero for '{self.label}': every paid request is blocked"
             )
             self._note_rejection("zero_budget", self.stopped_reason, estimate)
             raise BudgetExceeded(self.stopped_reason)
 
-        if self.max_cost_usd != UNLIMITED and estimate.estimated_cost_usd > self.remaining_usd + 1e-12:
+        if (
+            estimate.billable
+            and self.max_cost_usd != UNLIMITED
+            and estimate.estimated_cost_usd > self.remaining_usd + 1e-12
+        ):
             self.stopped_reason = (
                 f"cost budget exhausted: ${self.spent_usd:.4f}/${self.max_cost_usd:.4f} "
                 f"used, request estimated ${estimate.estimated_cost_usd:.4f}"

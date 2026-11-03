@@ -138,7 +138,7 @@ def main() -> int:
     http = Http(args.base_url)
     harness = Harness(http)
 
-    print("\nCrusor AI Marketing Director — Phase 1 + 2 acceptance\n" + "=" * 68)
+    print("\nCrusor AI Marketing Director — Phase 1 + 2 + 3A acceptance\n" + "=" * 68)
     wait_for_api(http)
 
     # ---- 1. backend starts ------------------------------------------------
@@ -884,6 +884,461 @@ def main() -> int:
         )
 
     harness.check("22. Phase 2 never publishes, sends or spends", c22)
+
+
+    # ====================================================================== #
+    # Phase 3A — content intelligence & internal content calendar
+    # ====================================================================== #
+    p3: dict[str, object] = {}
+    STUDIO = "/content-studio"
+    # Each run gets its own campaign name and idempotency keys: the harness is
+    # expected to be re-runnable against a long-lived database.
+    RUN_TAG = uuid.uuid4().hex[:8]
+    PLAN_KEY = f"acceptance-3a-plan-{RUN_TAG}"
+    GENERATE_KEY = f"acceptance-3a-generate-{RUN_TAG}"
+
+    def c23() -> str:
+        """A campaign gets a balanced weekly content plan."""
+        assert "brand_id" in p2, "no brand from criterion 14"
+        _, campaign = http.call(
+            "POST",
+            "/campaigns",
+            {
+                "brand_profile_id": p2["brand_id"],
+                "name": f"Crusor AI Developer Awareness {RUN_TAG}",
+                "objective": "Introduce Crusor AI to developers",
+                "platforms": ["instagram", "linkedin", "youtube", "x", "facebook", "reddit"],
+                "status": "active",
+            },
+            expect=201,
+        )
+        p3["campaign_id"] = campaign["id"]
+        status, plan = http.call(
+            "POST",
+            f"{STUDIO}/plans",
+            {
+                "campaign_id": campaign["id"],
+                "config": {"posts_per_week": 6, "variants": 2},
+                "generate": True,
+            },
+            headers={"Idempotency-Key": PLAN_KEY},
+            expect=(200, 201),
+        )
+        p3["plan_id"] = plan["id"]
+        slots = plan["slots"]
+        platforms = {slot["platform"] for slot in slots}
+        types = {slot["content_type"] for slot in slots}
+        assert plan["slot_count"] >= 6, plan["slot_count"]
+        assert len(platforms) >= 5, platforms
+        assert len(types) > 1, "every slot used the same content type"
+        assert plan["campaign_id"] == campaign["id"]
+        assert plan["generated_by"] == "mock", plan["generated_by"]
+        assert all(slot["content_item_id"] for slot in slots), "a slot produced no draft"
+        p3["item_ids"] = [slot["content_item_id"] for slot in slots]
+        # item 2 stays untouched so the variant proofs can inspect the set the
+        # planner stored on its first version (c26 and c27 edit items 0 and 1).
+        p3["variant_item"] = p3["item_ids"][2]
+        return (
+            f"{status} plan {plan['week_start']} with {len(slots)} slots across "
+            f"{sorted(platforms)} and {len(types)} content types; generated_by=mock"
+        )
+
+    harness.check("23. Weekly content plan is created for a campaign", c23)
+
+    def c24() -> str:
+        """Drafts are platform-specific and linked to the right campaign."""
+        assert "item_ids" in p3, "no plan from criterion 23"
+        seen = []
+        for item_id in p3["item_ids"][:6]:  # type: ignore[union-attr]
+            _, item = http.call("GET", f"/content/{item_id}", expect=200)
+            version = item["current_version"]
+            assert item["campaign_id"] == p3["campaign_id"], "draft detached from its campaign"
+            assert item["status"] == "DRAFT"
+            assert version["body"], "draft has no body"
+            meta = version["generation_metadata"]
+            assert meta["platform"] == item["platform"]
+            assert meta["content_type"] == item["format"]
+            assert meta["is_mock"] is True
+            assert "plan_id" in meta and meta["plan_id"] == p3["plan_id"]
+            seen.append(f"{item['platform']}/{item['format']} {len(version['body'])}ch")
+        return f"{len(seen)} drafts linked to campaign {p3['campaign_id']}: " + ", ".join(seen)
+
+    harness.check("24. Drafts are platform-specific and campaign-linked", c24)
+
+    def c25() -> str:
+        """The Brand Guardian validates a draft and stores structured issues."""
+        assert "item_ids" in p3, "no plan from criterion 23"
+        item_id = p3["item_ids"][0]  # type: ignore[index]
+        _, validation = http.call(
+            "POST", f"{STUDIO}/items/{item_id}/validate", {}, expect=(200, 201)
+        )
+        assert validation["verdict"] in {
+            "PASS",
+            "PASS_WITH_WARNINGS",
+            "NEEDS_REVISION",
+            "BLOCKED",
+        }, validation["verdict"]
+        assert validation["checked_rules"], "guardian checked no rules"
+        assert validation["content_version_id"], "validation not bound to a version"
+        _, history = http.call("GET", f"{STUDIO}/items/{item_id}/validations", expect=200)
+        assert history, "validation was not persisted"
+        p3["clean_item"] = item_id
+        return (
+            f"verdict {validation['verdict']} after {len(validation['checked_rules'])} rules; "
+            f"{len(history)} validation row(s) persisted for version "
+            f"{validation['content_version_id'][:8]}"
+        )
+
+    harness.check("25. Brand Guardian validates drafts", c25)
+
+    def c26() -> str:
+        """Unsupported claims are blocked and cannot enter approval."""
+        assert "item_ids" in p3, "no plan from criterion 23"
+        item_id = p3["item_ids"][1]  # type: ignore[index]
+        _, created = http.call(
+            "POST",
+            f"/content/{item_id}/versions",
+            {
+                "body": (
+                    "Crusor AI makes developers 300% faster and is used by 50,000 developers "
+                    "at Google and Meta. Book a demo to get started."
+                ),
+                "change_note": "acceptance: inject unsupported claims",
+            },
+            expect=(200, 201),
+        )
+        _, validation = http.call(
+            "POST", f"{STUDIO}/items/{item_id}/validate", {}, expect=(200, 201)
+        )
+        assert validation["verdict"] == "BLOCKED", validation["verdict"]
+        assert validation["blocking_count"] >= 1
+        banned = {issue["category"] for issue in validation["issues"]}
+        status, submit = http.call(
+            "POST", f"/content/{item_id}/transition", {"action": "submit"}
+        )
+        assert status == 409, f"blocked content was submittable ({status}: {submit})"
+        p3["blocked_item"] = item_id
+        return (
+            f"v{created['current_version']['version_number']} verdict BLOCKED with "
+            f"{validation['blocking_count']} blocking issue(s) in {sorted(banned)}; "
+            f"submit -> 409"
+        )
+
+    harness.check("26. Unsupported claims are blocked", c26)
+
+    def c27() -> str:
+        """Editing an item creates a new version and never rewrites the old one."""
+        assert "clean_item" in p3, "no validated item from criterion 25"
+        item_id = p3["clean_item"]
+        _, before = http.call("GET", f"/content/{item_id}", expect=200)
+        original_body = before["current_version"]["body"]
+        original_id = before["current_version"]["id"]
+        _, after = http.call(
+            "POST",
+            f"/content/{item_id}/versions",
+            {"body": original_body + "\n\nAcceptance edit.", "change_note": "acceptance edit"},
+            expect=(200, 201),
+        )
+        assert after["current_version"]["version_number"] == before["version_count"] + 1
+        _, versions = http.call("GET", f"/content/{item_id}/versions", expect=200)
+        original = next(version for version in versions if version["id"] == original_id)
+        assert original["body"] == original_body, "the earlier version was mutated"
+        p3["edited_version_id"] = after["current_version"]["id"]
+        return (
+            f"v{before['version_count']} -> v{after['current_version']['version_number']}; "
+            f"original version {original_id[:8]} unchanged"
+        )
+
+    harness.check("27. Editing creates a new version", c27)
+
+    def c28() -> str:
+        """Approval binds to the exact version; a later edit invalidates it."""
+        assert "clean_item" in p3, "no validated item from criterion 25"
+        item_id = p3["clean_item"]
+        # approval is only reachable from IN_REVIEW, so submit first
+        submitted = http.call(
+            "POST",
+            f"/content/{item_id}/transition",
+            {"action": "submit"},
+            expect=(200, 201),
+        )[1]
+        assert submitted["status"] == "IN_REVIEW", submitted["status"]
+        _, approved = http.call(
+            "POST",
+            f"/content/{item_id}/transition",
+            {"action": "approve", "content_version_id": p3["edited_version_id"]},
+            expect=(200, 201),
+        )
+        assert approved["status"] == "APPROVED", approved["status"]
+        assert approved["has_valid_approval"] is True
+        _, approvals_before = http.call("GET", f"/content/{item_id}/approvals", expect=200)
+        approved_version_id = approvals_before[-1]["content_version_id"]
+
+        _, edited = http.call(
+            "POST",
+            f"/content/{item_id}/versions",
+            {"body": approved["current_version"]["body"] + "\n\nPost-approval edit.",
+             "change_note": "acceptance: edit after approval"},
+            expect=(200, 201),
+        )
+        assert edited["has_valid_approval"] is False, "approval survived an edit"
+        assert edited["status"] == "DRAFT", edited["status"]
+        _, approvals_after = http.call("GET", f"/content/{item_id}/approvals", expect=200)
+        assert len(approvals_after) == len(approvals_before), "approval history was deleted"
+        assert approvals_after[-1]["content_version_id"] == approved_version_id
+        # the approved version itself is still exactly what was approved
+        _, versions = http.call("GET", f"/content/{item_id}/versions", expect=200)
+        still = next(version for version in versions if version["id"] == approved_version_id)
+        assert still["body"] == approved["current_version"]["body"]
+        return (
+            f"approval bound to version {approved_version_id[:8]}; editing invalidated it "
+            f"while keeping {len(approvals_after)} approval record(s) and the approved text intact"
+        )
+
+    harness.check("28. Approval is version-bound and edits invalidate it", c28)
+
+    def c29() -> str:
+        """Internal calendar entries can be moved without implying real scheduling."""
+        assert "edited_version_id" in p3, "no edited item from criterion 27"
+        item_id = p3["clean_item"]
+        status, entry = http.call(
+            "PATCH",
+            f"{STUDIO}/calendar/{item_id}",
+            {"planned_date": "2026-11-16", "planned_time": "10:15",
+             "note": "acceptance move"},
+            expect=200,
+        )
+        assert entry["planned_date"] == "2026-11-16"
+        assert entry["planned_time"] == "10:15"
+        assert entry["external_scheduling"] is False
+        assert entry["publishing_available"] is False
+        assert entry["label"] in {
+            "planned", "draft", "in_review", "approved", "changes_requested",
+            "rejected", "scheduled_internally", "cancelled", "failed",
+        }, entry["label"]
+        _, view = http.call("GET", f"{STUDIO}/calendar?view=week&anchor=2026-11-16", expect=200)
+        moved = [row for row in view["entries"] if row["content_item_id"] == item_id]
+        assert moved and moved[0]["planned_date"] == "2026-11-16", "the move was not persisted"
+        assert view["external_scheduling"] is False and view["publishing_available"] is False
+        return (
+            f"entry moved to {entry['planned_date']} {entry['planned_time']} "
+            f"(label {entry['label']}); calendar reports external_scheduling=false"
+        )
+
+    harness.check("29. Internal calendar can be updated", c29)
+
+    def c30() -> str:
+        """Nothing in Phase 3A can publish or externally schedule."""
+        for path in (
+            f"{STUDIO}/publish",
+            f"{STUDIO}/schedule",
+            f"{STUDIO}/calendar/publish",
+            f"{STUDIO}/items/{p3['clean_item']}/publish",
+        ):
+            status, _ = http.call("POST", path, {})
+            assert status in (403, 404, 405), f"{path} unexpectedly exists ({status})"
+        _, capabilities = http.call("GET", f"{STUDIO}/capabilities", expect=200)
+        assert capabilities["external_publishing"] is False
+        assert capabilities["external_scheduling"] is False
+        _, sysst = http.call("GET", "/system/status", expect=200)
+        assert sysst["publishing"]["status"] == "unavailable"
+        return (
+            "4 studio publish/schedule paths absent; capabilities report "
+            "external_publishing=false and external_scheduling=false"
+        )
+
+    harness.check("30. Publishing is unavailable", c30)
+
+    def c31() -> str:
+        """Zero budget blocks paid providers while the free mock still works."""
+        code = (
+            "import asyncio, json\n"
+            "from app.core.config import Settings\n"
+            "from app.llm.base import LLMRequest, LLMResponse\n"
+            "from app.llm.gateway import LLMGateway\n"
+            "from app.llm.mock_content import build_mock_provider\n"
+            "from app.llm.routing import BudgetGuard, estimate_cost\n"
+            "class FakeProvider:\n"
+            "    name = 'openai'\n"
+            "    def is_configured(self):\n"
+            "        return True\n"
+            "    async def structured(self, request):\n"
+            "        return LLMResponse(provider='openai', model='gpt-4o-mini', data={'ok': True},\n"
+            "                           prompt_tokens=1, completion_tokens=1, cost_usd=0.01,\n"
+            "                           latency_ms=1)\n"
+            "async def main():\n"
+            "    s = Settings(environment='test', content_provider='mock',\n"
+            "                 llm_default_provider='openai', llm_default_model='gpt-4o-mini')\n"
+            "    # The gateway holds both providers so the zero-budget proof is about the\n"
+            "    # budget and not about a missing provider registration.\n"
+            "    gw = LLMGateway(session=None, settings=s,\n"
+            "                    providers={'openai': FakeProvider(), 'mock': build_mock_provider()})\n"
+            "    req = LLMRequest(system_prompt='s', user_prompt='u', schema_name='x',\n"
+            "                     json_schema={}, max_tokens=16)\n"
+            "    def zero():\n"
+            "        return BudgetGuard(max_cost_usd=0.0, label='acceptance-zero')\n"
+            "    out = {}\n"
+            "    try:\n"
+            "        r = await gw.structured(agent_name='content', request=req, budget=zero())\n"
+            "        out['mock_allowed'] = (r.provider == 'mock' and r.cost_usd == 0.0)\n"
+            "    except Exception as exc:\n"
+            "        out['mock_allowed'] = 'error:' + type(exc).__name__\n"
+            "    blocked = []\n"
+            "    for agent in ('research', 'strategy'):\n"
+            "        try:\n"
+            "            await gw.structured(agent_name=agent, request=req, budget=zero())\n"
+            "            blocked.append('NOT_BLOCKED:' + agent)\n"
+            "        except Exception as exc:\n"
+            "            blocked.append(type(exc).__name__)\n"
+            "    out['paid_agents'] = blocked\n"
+            "    est = estimate_cost(provider='deepseek', model='deepseek-v4.1-flash',\n"
+            "                        prompt_tokens=1000, completion_tokens=1000, settings=s)\n"
+            "    out['paid_billable'] = est.billable\n"
+            "    out['paid_cost'] = est.estimated_cost_usd\n"
+            "    print(json.dumps(out))\n"
+            "asyncio.run(main())\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr[-800:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["mock_allowed"] is True, result
+        for outcome in result["paid_agents"]:
+            assert not str(outcome).startswith("NOT_BLOCKED"), result
+        assert result["paid_billable"] is True, "a paid model was treated as free"
+        assert result["paid_cost"] > 0, "a paid model was priced at zero"
+        return (
+            f"mock served at zero budget (cost 0.0); paid agents rejected with "
+            f"{result['paid_agents']}; deepseek-v4.1-flash still billable at "
+            f"${result['paid_cost']:.6f}/1k+1k"
+        )
+
+    harness.check("31. Zero budget blocks paid providers", c31)
+
+    def c32() -> str:
+        """Mock output is labelled as mock everywhere it surfaces."""
+        _, capabilities = http.call("GET", f"{STUDIO}/capabilities", expect=200)
+        assert capabilities["is_mock_provider"] is True
+        assert capabilities["live_model_calls_enabled"] is False
+        assert capabilities["content_provider"] == "mock"
+        _, plan = http.call("GET", f"{STUDIO}/plans/{p3['plan_id']}", expect=200)
+        assert plan["generated_by"] == "mock"
+        meta = plan["generation_metadata"]
+        assert meta["is_mock"] is True and meta["provider"] == "mock"
+        assert meta["model"] == "mock-content-v1"
+        _, variants = http.call(
+            "GET", f"{STUDIO}/items/{p3['variant_item']}/variants", expect=200
+        )
+        assert variants["is_mock"] is True, variants["is_mock"]
+        assert len(variants["variants"]) >= 2, variants["variants"]
+        _, item = http.call("GET", f"/content/{p3['variant_item']}", expect=200)
+        version_meta = item["current_version"]["generation_metadata"]
+        assert version_meta.get("provider") in {"mock", "deterministic"}
+        return (
+            f"capabilities provider=mock live_model_calls_enabled=false; plan "
+            f"generated_by={plan['generated_by']} model={meta['model']}; variants is_mock=true"
+        )
+
+    harness.check("32. Mock generation is clearly attributed", c32)
+
+    def c33() -> str:
+        """Variants are compared and the selection is preserved as a version."""
+        assert "variant_item" in p3, "no untouched item from criterion 23"
+        item_id = p3["variant_item"]
+        _, variants = http.call("GET", f"{STUDIO}/items/{item_id}/variants", expect=200)
+        assert len(variants["variants"]) >= 2, variants
+        bodies = {variant["body"] for variant in variants["variants"]}
+        assert len(bodies) == len(variants["variants"]), "variants are reworded duplicates"
+        current = variants["selected_variant"]
+        other = next(v["index"] for v in variants["variants"] if v["index"] != current)
+        _, selected = http.call(
+            "POST",
+            f"{STUDIO}/items/{item_id}/variants/select",
+            {"variant_index": other, "change_note": "acceptance: pick another variant"},
+            expect=(200, 201),
+        )
+        _, after = http.call("GET", f"{STUDIO}/items/{item_id}/variants", expect=200)
+        assert after["selected_variant"] == other
+        assert after["version_number"] == selected["version_number"]
+        chosen = next(v for v in after["variants"] if v["index"] == other)
+        _, item = http.call("GET", f"/content/{item_id}", expect=200)
+        assert item["current_version"]["body"] == chosen["body"], "selected variant not applied"
+        return (
+            f"{len(after['variants'])} distinct variants; selecting index {other} produced "
+            f"v{selected['version_number']} with that exact body"
+        )
+
+    harness.check("33. Variants are compared and preserved", c33)
+
+    def c34() -> str:
+        """Generation is idempotent: a retry never duplicates campaigns or items."""
+        _, again = http.call(
+            "POST",
+            f"{STUDIO}/plans",
+            {
+                "campaign_id": p3["campaign_id"],
+                "config": {"posts_per_week": 6, "variants": 2},
+                "generate": True,
+            },
+            headers={"Idempotency-Key": PLAN_KEY},
+            expect=(200, 201),
+        )
+        assert again["id"] == p3["plan_id"], "the retry created a second plan"
+        assert again["slot_count"] == 6, "the retry added slots"
+        _, twice = http.call(
+            "POST",
+            f"{STUDIO}/generate",
+            {"platform": "linkedin", "content_type": "social_post",
+             "campaign_id": p3["campaign_id"]},
+            headers={"Idempotency-Key": GENERATE_KEY},
+            expect=(200, 201),
+        )
+        _, third = http.call(
+            "POST",
+            f"{STUDIO}/generate",
+            {"platform": "linkedin", "content_type": "social_post",
+             "campaign_id": p3["campaign_id"]},
+            headers={"Idempotency-Key": GENERATE_KEY},
+            expect=(200, 201),
+        )
+        assert twice["content_item_id"] == third["content_item_id"], "retry created a new item"
+        _, campaigns = http.call("GET", "/campaigns", expect=200)
+        matching = [c for c in campaigns if c["id"] == p3["campaign_id"]]
+        assert len(matching) == 1
+        return (
+            f"plan retry returned plan {again['id'][:8]} with {again['slot_count']} slots; "
+            f"generate retry returned item {twice['content_item_id'][:8]}"
+        )
+
+    harness.check("34. Generation is idempotent", c34)
+
+    def c35() -> str:
+        """Phase 1 + 2 acceptance still holds in this same run."""
+        def number(name: str) -> int | None:
+            head = name.split(".")[0].strip()
+            digits = "".join(ch for ch in head if ch.isdigit())
+            return int(digits) if digits else None
+
+        prior = [ok for name, ok, _ in harness.results
+                 if (number(name) or 99) <= 22]
+        failed = [name for name, ok, _ in harness.results
+                  if (number(name) or 99) <= 22 and not ok]
+        assert not failed, f"earlier criteria regressed: {failed}"
+        assert len(prior) >= 22, f"expected at least 22 earlier checks, ran {len(prior)}"
+        _, overview = http.call("GET", f"{STUDIO}/overview", expect=200)
+        assert overview["total_drafts"] >= 6
+        return (
+            f"all {len(prior)} Phase 1/2 checks still pass alongside the Phase 3A criteria; "
+            f"studio overview reports {overview['total_drafts']} drafts"
+        )
+
+    harness.check("35. Phase 1 and Phase 2 acceptance is intact", c35)
 
 
     # ---- summary ---------------------------------------------------------

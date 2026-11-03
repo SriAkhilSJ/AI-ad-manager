@@ -127,11 +127,24 @@ class Settings(BaseSettings):
     # accept that the placeholder may under-estimate by one request.
     llm_allow_unverified_pricing: bool = False
 
+    # ---- Phase 3A content generation ------------------------------------
+    #: Who writes content drafts. ``mock`` (the default) uses the deterministic,
+    #: free, self-identifying provider, so Phase 3A never spends money. ``auto``
+    #: uses the configured LLM tiers when they are available and falls back to the
+    #: agent's deterministic path. ``disabled`` generates nothing.
+    content_provider: Literal["mock", "auto", "disabled"] = "mock"
+    #: Per-platform spec overrides, e.g. {"x": {"body_max_chars": 280}}.
+    content_platform_overrides_json: dict[str, Any] = Field(default_factory=dict)
+
     # Budget envelopes. The brief's default is "initially equivalent to ₹5 for a
     # simple task"; USD is the accounting currency, so the default is a
     # configurable conversion of that intention, not a hardcoded guess.
     strategy_budget_usd: float = 0.06      # ≈ ₹5 at the configured FX rate
     research_budget_usd: float = 0.12      # research needs more calls than one task
+    #: Phase 3A: one weekly content plan. A plan makes many small calls, so the
+    #: envelope is per-plan, not per-post, and is enforced by one reservation
+    #: ledger shared by the Content Agent and the Brand Guardian.
+    content_budget_usd: float = 0.06
     usd_inr_rate: float = 83.0
     budget_currency: str = "USD"
 
@@ -139,6 +152,12 @@ class Settings(BaseSettings):
     research_max_iterations: int = 6
     research_max_tool_calls: int = 28
     research_max_wall_seconds: int = 240
+    # Bounded content planning. ``content_max_slots`` caps how many drafts one
+    # plan may generate, so a large week cannot quietly become a large bill.
+    content_max_slots: int = 12
+    content_max_tool_calls: int = 40
+    content_max_wall_seconds: int = 300
+    content_max_tokens: int = 40_000
     strategy_max_iterations: int = 4
     strategy_max_tool_calls: int = 12
     strategy_max_wall_seconds: int = 180

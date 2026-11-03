@@ -12,6 +12,7 @@ from app.api.v1 import (
     brand,
     campaigns,
     content,
+    content_studio,
     creative,
     director,
     research,
@@ -25,6 +26,7 @@ api_router.include_router(auth.router)
 api_router.include_router(brand.router)
 api_router.include_router(campaigns.router)
 api_router.include_router(content.router)
+api_router.include_router(content_studio.router)
 api_router.include_router(creative.router)
 api_router.include_router(director.router)
 api_router.include_router(agents.router)

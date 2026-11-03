@@ -161,6 +161,37 @@ class ApprovalService:
             )
         return record
 
+    async def _require_validation_clear(self, item: ContentItem) -> None:
+        """Refuse to start review while the current version has critical issues."""
+        from app.models.content_plan import ContentValidation, ValidationVerdict
+
+        if item.current_version_id is None:
+            return
+        row = (
+            await self.session.execute(
+                select(ContentValidation)
+                .where(ContentValidation.content_version_id == item.current_version_id)
+                .order_by(ContentValidation.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return
+        if row.verdict in (
+            ValidationVerdict.BLOCKED.value,
+            ValidationVerdict.NEEDS_REVISION.value,
+        ):
+            raise InvalidStateTransition(
+                "This version cannot enter review: the Brand Guardian found "
+                "unresolved critical issues.",
+                details={
+                    "verdict": row.verdict,
+                    "blocking_count": row.blocking_count,
+                    "requires_founder_confirmation": row.requires_founder_confirmation,
+                    "issues": row.issues[:5],
+                },
+            )
+
     async def current_content_hash(self, item: ContentItem) -> str:
         """Hash of the item's *current* version (authoritative, DB-backed).
 
@@ -224,6 +255,14 @@ class ApprovalService:
                 },
             )
         target = allowed[action]
+
+        # --- Phase 3A validation gate -----------------------------------------
+        # Content whose latest Brand Guardian verdict is BLOCKED or NEEDS_REVISION
+        # may not enter review. This only *adds* a precondition: items with no
+        # validation record (everything created before Phase 3A, and manual drafts)
+        # behave exactly as before.
+        if action == ApprovalAction.SUBMIT.value:
+            await self._require_validation_clear(item)
 
         # --- approval gate -----------------------------------------------------
         approval: ApprovalRecord | None = None

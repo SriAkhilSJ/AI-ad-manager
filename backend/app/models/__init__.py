@@ -11,6 +11,15 @@ from app.models.audit import AuditLog
 from app.models.brand import BrandProfile, CompetitorProfile, ContentPillar, MarketingGoal
 from app.models.campaign import Campaign, CampaignStatus
 from app.models.content import ContentItem, ContentStatus, ContentVersion
+from app.models.content_plan import (
+    ContentCalendarEntry,
+    ContentPlan,
+    ContentPlanSlot,
+    ContentValidation,
+    PlanStatus,
+    SlotStatus,
+    ValidationVerdict,
+)
 from app.models.creative import CreativeAsset, CreativeAssetStatus, CreativeKind
 from app.models.idempotency import IdempotencyKey
 from app.models.memory import MarketingMemory, MemoryKind
@@ -61,6 +70,14 @@ __all__ = [
     "ContentItem",
     "ContentStatus",
     "ContentVersion",
+    # Phase 3A
+    "ContentCalendarEntry",
+    "ContentPlan",
+    "ContentPlanSlot",
+    "ContentValidation",
+    "PlanStatus",
+    "SlotStatus",
+    "ValidationVerdict",
     "CreativeAsset",
     "CreativeAssetStatus",
     "CreativeKind",

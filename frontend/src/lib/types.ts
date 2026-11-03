@@ -786,3 +786,251 @@ export interface StrategyWorkflowStartResponse {
   cost_estimate: CostEstimate
   state: StrategyWorkflowState
 }
+
+// ---------------------------------------------------------------- Phase 3A
+export type ContentTypeName =
+  | 'social_post'
+  | 'caption'
+  | 'hook'
+  | 'short_form_video_script'
+  | 'educational_post'
+  | 'product_announcement'
+  | 'founder_story'
+  | 'thread'
+  | 'carousel_outline'
+  | 'community_discussion'
+  | 'call_to_action'
+
+export interface PlatformSpec {
+  platform: string
+  label: string
+  supported_types: ContentTypeName[]
+  body_max_chars: number
+  title_max_chars: number
+  hook_max_chars: number
+  cta_max_chars: number
+  hashtag_min: number
+  hashtag_max: number
+  hashtag_guidance: string
+  formatting_rules: string[]
+  cta_guidance: string
+  validation_rules: string[]
+  tone: string
+  community_first: boolean
+}
+
+export interface StudioCapabilities {
+  content_types: ContentTypeName[]
+  platforms: string[]
+  content_provider: string
+  is_mock_provider: boolean
+  live_model_calls_enabled: boolean
+  external_publishing: false
+  external_scheduling: false
+  video_rendering: false
+  notes: string[]
+}
+
+export interface StudioOverview {
+  total_drafts: number
+  pending_review: number
+  approved: number
+  scheduled_internally: number
+  blocked: number
+  by_platform: Record<string, number>
+  by_campaign: Record<string, number>
+  by_validation_status: Record<string, number>
+  content_provider: string
+  is_mock_provider: boolean
+  live_model_calls_enabled: boolean
+}
+
+export type ValidationStatus = 'PASS' | 'PASS_WITH_WARNINGS' | 'NEEDS_REVISION' | 'BLOCKED'
+
+export interface ValidationIssue {
+  rule: string
+  severity: 'blocking' | 'warning'
+  category: string
+  message: string
+  explanation?: string
+  evidence?: string
+  affected_text?: string
+  suggestion?: string
+  requires_founder_confirmation?: boolean
+}
+
+export interface ValidationResult {
+  verdict: ValidationStatus
+  score: number
+  issues: ValidationIssue[]
+  checked_rules: string[]
+  blocking_count: number
+  warning_count: number
+  requires_founder_confirmation: boolean
+  provider: string
+  generation_mode: string
+  content_version_id: string
+}
+
+export interface ContentVariant {
+  index: number
+  headline: string
+  hook: string
+  body: string
+  hashtags: string[]
+  call_to_action: string
+  outline?: string[]
+  character_count: number
+  provider: string
+  model: string
+  is_mock: boolean
+  generation_mode: string
+  score: number
+  validation: {
+    status: ValidationStatus
+    verdict?: string
+    score: number
+    blocking_count: number
+    warning_count: number
+    requires_founder_confirmation?: boolean
+    issues: ValidationIssue[]
+    checked_rules?: string[]
+  }
+}
+
+export interface VariantSet {
+  content_item_id: string
+  current_version_id: string | null
+  version_number: number | null
+  selected_variant: number | null
+  variants: ContentVariant[]
+  is_mock: boolean
+  provider: string
+  note: string
+}
+
+export interface GenerateRequest {
+  campaign_id?: string | null
+  platform: string
+  content_type: ContentTypeName | string
+  audience?: string
+  pillar?: string
+  objective?: string
+  primary_message?: string
+  variants?: number
+  planned_date?: string
+  planned_time?: string
+}
+
+export interface GeneratedItem {
+  content_item_id: string
+  version_id: string
+  version_number: number
+  platform: string
+  content_type: string
+  title: string
+  status: string
+  validation_status: ValidationStatus
+  selected_variant: number
+  variants: ContentVariant[]
+  is_mock: boolean
+  provider: string
+  generation_metadata: Record<string, unknown>
+}
+
+export interface PlanConfig {
+  posts_per_week: number
+  platforms?: string[]
+  content_mix?: Record<string, string[]>
+  audience_focus?: string
+  publishing_windows?: Record<string, string>
+  variants?: number
+  campaign_duration_weeks?: number
+}
+
+export interface PlanRequest {
+  campaign_id?: string | null
+  week_start?: string
+  config?: PlanConfig
+  generate?: boolean
+  replace?: boolean
+}
+
+export interface PlanSlot {
+  id: string
+  position: number
+  platform: string
+  content_type: string
+  scheduled_date: string
+  scheduled_time: string
+  audience: string
+  pillar: string
+  objective: string
+  primary_message: string
+  rationale: string
+  status: string
+  content_item_id: string | null
+  variant_count: number
+  selected_variant: number | null
+  validation_status: ValidationStatus | null
+  is_mock: boolean | null
+}
+
+export interface ContentPlan {
+  id: string
+  brand_profile_id: string
+  campaign_id: string | null
+  week_start: string
+  week_end: string
+  status: string
+  objective: string
+  platforms: string[]
+  config: Record<string, unknown>
+  slot_count: number
+  item_count: number
+  completeness_score: number
+  generated_by: string
+  generation_metadata: Record<string, unknown>
+}
+
+export interface ContentPlanDetail extends ContentPlan {
+  slots: PlanSlot[]
+}
+
+export type CalendarLabel =
+  | 'planned'
+  | 'draft'
+  | 'in_review'
+  | 'approved'
+  | 'changes_requested'
+  | 'rejected'
+  | 'scheduled_internally'
+  | 'cancelled'
+  | 'failed'
+
+export interface CalendarEntry {
+  entry_id: string
+  content_item_id: string
+  title: string
+  platform: string
+  content_type: string
+  campaign_id: string | null
+  plan_id: string | null
+  status: string
+  label: CalendarLabel
+  planned_date: string
+  planned_time: string
+  note: string
+  approval_required: boolean
+  external_scheduling: false
+  publishing_available: false
+}
+
+export interface CalendarView {
+  view: 'month' | 'week' | 'list'
+  start: string
+  end: string
+  entries: CalendarEntry[]
+  external_scheduling: false
+  publishing_available: false
+}

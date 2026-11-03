@@ -24,6 +24,17 @@ class CampaignService:
             raise NotFoundError(f"Campaign {campaign_id} not found.")
         return campaign
 
+    async def find_by_name(
+        self, *, brand_profile_id: uuid.UUID, name: str
+    ) -> Campaign | None:
+        """Look up a campaign by its unique (brand, name) pair."""
+        result = await self.session.execute(
+            select(Campaign).where(
+                Campaign.brand_profile_id == brand_profile_id, Campaign.name == name
+            )
+        )
+        return result.scalars().first()
+
     async def list(
         self,
         *,

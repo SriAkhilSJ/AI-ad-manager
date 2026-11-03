@@ -21,7 +21,8 @@ dist/
 backend/.data/
 *.sqlite3
 *.db
-storage/
+/storage/
+.data/storage/
 
 # ---- Secrets ----
 .env

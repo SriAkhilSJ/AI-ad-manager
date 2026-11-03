@@ -1,0 +1,78 @@
+{
+  "generated_at": "2026-11-03T04:23:45Z",
+  "base_url": "http://127.0.0.1:8000",
+  "passed": 14,
+  "total": 14,
+  "criteria": [
+    {
+      "criterion": "1. Backend starts",
+      "passed": true,
+      "detail": "liveness 200 (uptime 6.9s); /system/status reachable pre-auth -> 200"
+    },
+    {
+      "criterion": "1b. /system/status reports every integration honestly",
+      "passed": true,
+      "detail": "sections=9; publishing=unavailable/human_approval_required; storage=local; llm=unavailable"
+    },
+    {
+      "criterion": "2. Frontend builds and serves a real SPA",
+      "passed": true,
+      "detail": "dist build present: 1 bundle(s), index-Bka0ObA9.js"
+    },
+    {
+      "criterion": "3. Migrations execute against the live database",
+      "passed": true,
+      "detail": "alembic current -> 02cf853b2147 (head)"
+    },
+    {
+      "criterion": "4. Brand profile create + retrieve",
+      "passed": true,
+      "detail": "seeded profile: Crusor AI / AI-powered IDE (id 55e6f5e6\u2026)"
+    },
+    {
+      "criterion": "5. Director initialises a stateful workflow",
+      "passed": true,
+      "detail": "15 nodes, interrupt at human_approval; workflow wf_02e821280a3247de produced 3 drafts in 8 iterations and is awaiting approval"
+    },
+    {
+      "criterion": "6. All six agents invocable through structured interfaces",
+      "passed": true,
+      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run d8bbcbeb\u2026, 3 trace events)"
+    },
+    {
+      "criterion": "7. Workflow state persists across restarts",
+      "passed": true,
+      "detail": "a fresh process reconstructed thread wf_02e821280a3247de: 23 checkpoints, identical plan and content ids"
+    },
+    {
+      "criterion": "8. Content create + immutable version history",
+      "passed": true,
+      "detail": "content 5661ace5\u2026 now at v2 with distinct content hashes"
+    },
+    {
+      "criterion": "9. Approval state machine + invalidation on edit",
+      "passed": true,
+      "detail": "DRAFT->APPROVED refused (409); submit->approve accepted; editing an approved item returned it to DRAFT with the approval ledger marked invalidated"
+    },
+    {
+      "criterion": "10. Unapproved publication is blocked (and approved is not faked)",
+      "passed": true,
+      "detail": "DRAFT publish -> 409 approval_required, no publication row; approved publish -> 503 integration_unavailable (no transport in Phase 1), item remains APPROVED"
+    },
+    {
+      "criterion": "11. Model usage and cost are recordable",
+      "passed": true,
+      "detail": "usage ledger 0 -> 1600 tokens, $0.0000 -> $0.0042 across 1 provider row(s)"
+    },
+    {
+      "criterion": "12. Automated test suite passes",
+      "passed": true,
+      "detail": "160 tests, 0 failures, 0 errors"
+    },
+    {
+      "criterion": "13. Architecture documentation is complete",
+      "passed": true,
+      "detail": "5 architecture documents present (00-ARCHITECTURE-AUDIT.md:5952B, 01-IMPLEMENTATION-PLAN.md:8576B, 02-FILE-PLAN.md:9143B, 03-RISKS-AND-DEPENDENCIES.md:5786B, 04-ACCEPTANCE-EVIDENCE.md:11065B)"
+    }
+  ]
+}

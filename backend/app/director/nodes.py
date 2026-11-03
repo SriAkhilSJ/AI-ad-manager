@@ -533,6 +533,15 @@ class DirectorNodes:
         strategy = state.get("strategy") or {}
         name = strategy.get("campaign_name") or f"{brand.company} campaign {state.get('workflow_id', '')[:8]}"
         service = CampaignService(self.session)
+        # Starting a second workflow with the same objective produces the same
+        # campaign name. That is a *reuse*, not an error: the campaign is the
+        # container for the content, and duplicating it would fragment reporting.
+        existing = await service.find_by_name(brand_profile_id=brand.id, name=name[:190])
+        if existing is not None:
+            return {
+                "created_campaign_id": str(existing.id),
+                "trace": [_trace("campaign_reused", name=existing.name)],
+            }
         try:
             campaign = await service.create(
                 brand_profile_id=brand.id,
@@ -548,8 +557,17 @@ class DirectorNodes:
                 created_by_agent="strategy",
                 actor_id=uuid.UUID(state["actor_id"]) if state.get("actor_id") else None,
             )
-        except Exception as exc:  # duplicate name or validation
-            logger.warning("campaign_create_failed", error=type(exc).__name__)
+        except Exception as exc:  # validation or a concurrent create of the same name
+            logger.warning(
+                "campaign_create_failed", error=type(exc).__name__, reason=str(exc)[:200]
+            )
+            # A concurrent writer may have won the race; re-check before failing.
+            raced = await service.find_by_name(brand_profile_id=brand.id, name=name[:190])
+            if raced is not None:
+                return {
+                    "created_campaign_id": str(raced.id),
+                    "trace": [_trace("campaign_reused", name=raced.name)],
+                }
             return {
                 "trace": [_trace("campaign_not_created", error=type(exc).__name__)],
                 "errors": [

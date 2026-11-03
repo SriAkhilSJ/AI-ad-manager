@@ -8,6 +8,7 @@ from app.api.deps import DB, CurrentUser, EditorUser
 from app.core.errors import ValidationProblem
 from app.schemas.creative import CreativeAssetCreate, CreativeAssetOut, CreativeReplaceOut
 from app.services.creative import CreativeService
+from app.storage.base import get_storage, storage_key
 
 router = APIRouter(prefix="/creative", tags=["creative"])
 
@@ -45,26 +46,41 @@ async def upload_asset(
     replace_asset_id: uuid.UUID | None = Form(default=None),
 ) -> CreativeAssetOut:
     data = await file.read()
+    if not data:
+        raise ValidationProblem("Uploaded file is empty.")
     if len(data) > MAX_UPLOAD_BYTES:
         raise ValidationProblem(
             f"File exceeds the {MAX_UPLOAD_BYTES // (1024 * 1024)}MB limit."
         )
     service = CreativeService(session)
+    storage = get_storage()
     if replace_asset_id is not None:
+        existing = await service.get_asset(replace_asset_id)
+        stored = await storage.put(
+            existing.storage_key or storage_key(file.filename or "asset"),
+            data,
+            content_type=file.content_type,
+        )
         asset, _invalidated = await service.replace(
             replace_asset_id,
             actor_id=user.id,
             content_bytes=data,
+            storage_key=stored.key,
+            public_url=stored.public_url,
             mime_type=file.content_type,
             filename=file.filename,
         )
     else:
+        key = storage_key(file.filename or "asset")
+        stored = await storage.put(key, data, content_type=file.content_type)
         asset = await service.register(
             content_item_id=content_item_id,
             kind=kind,
             filename=file.filename or "asset",
             mime_type=file.content_type or "",
             content_bytes=data,
+            storage_key=stored.key,
+            public_url=stored.public_url,
             prompt=prompt,
             actor_id=user.id,
         )
@@ -93,10 +109,21 @@ async def replace_asset(
     file: UploadFile = File(...),
 ) -> CreativeReplaceOut:
     data = await file.read()
-    asset, invalidated = await CreativeService(session).replace(
+    if not data:
+        raise ValidationProblem("Replacement file is empty.")
+    service = CreativeService(session)
+    existing = await service.get_asset(asset_id)
+    stored = await get_storage().put(
+        existing.storage_key or storage_key(file.filename or "asset"),
+        data,
+        content_type=file.content_type,
+    )
+    asset, invalidated = await service.replace(
         asset_id,
         actor_id=user.id,
         content_bytes=data,
+        storage_key=stored.key,
+        public_url=stored.public_url,
         mime_type=file.content_type,
         filename=file.filename,
     )

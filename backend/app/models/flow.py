@@ -101,6 +101,18 @@ class FlowAssetExport(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False, default="flow-asset")
     max_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
+    # --- Phase 3C.2 chunked transfer -------------------------------------
+    #: ``single`` for the one-shot PUT, ``chunked`` once a chunk arrives. A ticket
+    #: never mixes the two, so a partial chunked upload cannot be finished by a
+    #: single-shot body (or vice versa).
+    upload_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="single")
+    chunk_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunks_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: ``[{"index": 0, "sha256": "...", "size": 1234}, ...]`` — one entry per
+    #: accepted chunk, in arrival order (which must be index order).
+    chunk_manifest: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+
     received_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     storage_key: Mapped[str] = mapped_column(Text, nullable=False, default="")

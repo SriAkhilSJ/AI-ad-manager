@@ -33,6 +33,9 @@ class GenerationRequestIn(BaseModel):
     aspect_ratio: str = Field(default="4:5", max_length=16)
     duration_seconds: int = Field(default=0, ge=0, le=120)
     reference_media_ids: list[str] = Field(default_factory=list, max_length=4)
+    #: Duplicate-paid-generation guard. One key maps to one request; reuse with a
+    #: different payload is refused with 409 ``flow_idempotency_conflict``.
+    idempotency_key: str = Field(default="", max_length=128)
     dry_run: bool = True
 
 
@@ -41,6 +44,8 @@ class GenerationDecisionOut(BaseModel):
 
     authorized: bool
     dispatched: bool = False
+    lifecycle: str = "NOT_SUBMITTED"
+    idempotency_key: str = ""
     live_generation_enabled: bool = False
     approval_id: uuid.UUID | None = None
     approval_hash: str = ""
@@ -127,6 +132,11 @@ class ExportTicketOut(BaseModel):
     expected_sha256: str = ""
     declared_content_type: str = ""
     max_bytes: int = 0
+    #: Bounded chunked transfer (Phase 3C.2 §9). ``upload_mode`` is ``single`` until
+    #: the first chunk arrives.
+    upload_mode: str = "single"
+    chunk_bytes: int = 0
+    max_chunks: int = 0
     one_time: bool = True
     note: str = (
         "The ticket is single-use and expires. The asset only exists after the bytes "
@@ -140,11 +150,25 @@ class ExportStatusOut(BaseModel):
     asset_id: uuid.UUID | None = None
     checksum: str = ""
     received_bytes: int = 0
+    upload_mode: str = "single"
+    chunk_count: int = 0
+    chunks_received: int = 0
+    complete: bool = False
     width: int | None = None
     height: int | None = None
     error_code: str = ""
     error_message: str = ""
     consumed_at: datetime | None = None
+
+
+class FlowChunkHeaders(BaseModel):
+    """Documentation-only model: the headers a chunk must carry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0)
+    total: int = Field(ge=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class FlowStatusOut(BaseModel):
@@ -159,5 +183,8 @@ class FlowStatusOut(BaseModel):
     generation: dict[str, Any]
     asset_export: dict[str, Any]
     companion: dict[str, Any]
+    source_gate: dict[str, Any]
+    protocol: dict[str, Any]
+    lifecycle: dict[str, Any]
     upstream_blockers: list[dict[str, Any]]
     note: str

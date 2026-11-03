@@ -41,6 +41,27 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 PROTOCOL_VERSION = "flow.bridge.v1"
 
+#: Protocols this build speaks. Anything else is refused at the handshake, from
+#: Crusor's side, without waiting for the extension to agree (Phase 3C.2 §10).
+SUPPORTED_PROTOCOLS: tuple[str, ...] = (PROTOCOL_VERSION,)
+
+#: WebSocket close codes used by the bridge. They are part of the contract, so
+#: they live here rather than as magic numbers in ``bridge.py``.
+WS_CLOSE_MALFORMED = 4400
+WS_CLOSE_UNAUTHORIZED = 4401
+WS_CLOSE_SUPERSEDED = 4000
+WS_CLOSE_PROVENANCE = 4422
+WS_CLOSE_PROTOCOL = 4426
+
+#: Fields a HELLO must carry before the bridge will exchange a single command.
+REQUIRED_PROVENANCE_FIELDS: tuple[str, ...] = (
+    "extension_version",
+    "service_worker_version",
+    "mcp_version",
+    "source_commit",
+    "build_id",
+)
+
 #: The complete set of commands Crusor may ever send to the extension.
 ALLOWED_COMMANDS: tuple[str, ...] = (
     "status",
@@ -170,10 +191,101 @@ class SubmissionState(str, Enum):
     PENDING = "pending"
     DISPATCHED = "dispatched"
     SUBMITTED = "submitted"
+    #: The provider confirmed the job exists and is still working on it.
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     UNKNOWN_SUBMISSION = "unknown_submission"
     CANCELLED = "cancelled"
+
+
+class FlowLifecycle(str, Enum):
+    """The eight submission states required by Phase 3C.2 §8.
+
+    ``SubmissionState`` remains the coordinator's internal vocabulary; this is the
+    canonical state machine every surface reports, so a UI or an operator sees the
+    same eight names no matter which transport produced them.
+    """
+
+    NOT_SUBMITTED = "NOT_SUBMITTED"
+    SUBMITTING = "SUBMITTING"
+    SUBMITTED = "SUBMITTED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    UNKNOWN_SUBMISSION = "UNKNOWN_SUBMISSION"
+    CANCELLED = "CANCELLED"
+
+
+#: Legal transitions. Everything not listed is refused by :func:`transition`.
+#:
+#: Note the shape: once a job leaves ``SUBMITTING`` it can only reach
+#: ``SUBMITTED``/``RUNNING``/``SUCCEEDED``, or fall into ``UNKNOWN_SUBMISSION``.
+#: There is deliberately **no** edge from ``UNKNOWN_SUBMISSION`` back to
+#: ``NOT_SUBMITTED``: an ambiguous attempt can never be re-armed for dispatch.
+LEGAL_TRANSITIONS: dict[FlowLifecycle, frozenset[FlowLifecycle]] = {
+    FlowLifecycle.NOT_SUBMITTED: frozenset(
+        {FlowLifecycle.SUBMITTING, FlowLifecycle.CANCELLED, FlowLifecycle.FAILED}
+    ),
+    FlowLifecycle.SUBMITTING: frozenset(
+        {
+            FlowLifecycle.SUBMITTED,
+            FlowLifecycle.RUNNING,
+            FlowLifecycle.SUCCEEDED,
+            FlowLifecycle.FAILED,
+            FlowLifecycle.UNKNOWN_SUBMISSION,
+        }
+    ),
+    FlowLifecycle.SUBMITTED: frozenset(
+        {
+            FlowLifecycle.RUNNING,
+            FlowLifecycle.SUCCEEDED,
+            FlowLifecycle.FAILED,
+            FlowLifecycle.UNKNOWN_SUBMISSION,
+            FlowLifecycle.CANCELLED,
+        }
+    ),
+    FlowLifecycle.RUNNING: frozenset(
+        {
+            FlowLifecycle.SUCCEEDED,
+            FlowLifecycle.FAILED,
+            FlowLifecycle.UNKNOWN_SUBMISSION,
+            FlowLifecycle.CANCELLED,
+        }
+    ),
+    FlowLifecycle.SUCCEEDED: frozenset(),
+    FlowLifecycle.FAILED: frozenset({FlowLifecycle.NOT_SUBMITTED}),  # explicit re-arm only
+    FlowLifecycle.UNKNOWN_SUBMISSION: frozenset({FlowLifecycle.SUCCEEDED, FlowLifecycle.FAILED}),
+    FlowLifecycle.CANCELLED: frozenset(),
+}
+
+#: Internal coordinator state -> canonical lifecycle state.
+_STATE_TO_LIFECYCLE: dict["SubmissionState", FlowLifecycle] = {
+    SubmissionState.PENDING: FlowLifecycle.NOT_SUBMITTED,
+    SubmissionState.DISPATCHED: FlowLifecycle.SUBMITTING,
+    SubmissionState.SUBMITTED: FlowLifecycle.SUBMITTED,
+    SubmissionState.RUNNING: FlowLifecycle.RUNNING,
+    SubmissionState.COMPLETED: FlowLifecycle.SUCCEEDED,
+    SubmissionState.FAILED: FlowLifecycle.FAILED,
+    SubmissionState.UNKNOWN_SUBMISSION: FlowLifecycle.UNKNOWN_SUBMISSION,
+    SubmissionState.CANCELLED: FlowLifecycle.CANCELLED,
+}
+
+
+def lifecycle_for(state: "SubmissionState") -> FlowLifecycle:
+    return _STATE_TO_LIFECYCLE[state]
+
+
+def transition(current: FlowLifecycle, target: FlowLifecycle) -> FlowLifecycle:
+    """Return ``target`` if the move is legal, else raise :class:`IllegalTransition`."""
+    if current is target:
+        return target
+    if target not in LEGAL_TRANSITIONS[current]:
+        raise IllegalTransition(
+            f"{current.value} -> {target.value} is not a legal generation transition.",
+            details={"from": current.value, "to": target.value},
+        )
+    return target
 
 
 TERMINAL_SUBMISSION_STATES = frozenset(
@@ -213,11 +325,23 @@ class UnsafeBinding(FlowProtocolError):
     code = "unsafe_result_binding"
 
 
+class IllegalTransition(FlowProtocolError):
+    """A state change the state machine does not allow."""
+
+    code = "flow_illegal_transition"
+
+
 # --------------------------------------------------------------------------- #
 # message shapes
 # --------------------------------------------------------------------------- #
 class HelloMessage(BaseModel):
-    """First frame on the WebSocket. Nothing is dispatched before it validates."""
+    """First frame on the WebSocket. Nothing is dispatched before it validates.
+
+    Phase 3C.2 adds provenance: the extension must report the version of *every*
+    component it ships plus the commit and build identifier it was produced from.
+    A HELLO that merely claims a version is not evidence, so the fields are
+    cross-checked by :func:`app.flow.provenance.verify_provenance`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -227,12 +351,19 @@ class HelloMessage(BaseModel):
     pairing_secret: str = Field(min_length=16, max_length=256)
     extension_id: str = Field(default="", max_length=128)
     extension_version: str = Field(default="", max_length=64)
+    #: Phase 3C.2 provenance — required by the bridge, validated by verify_provenance.
+    service_worker_version: str = Field(default="", max_length=64)
+    mcp_version: str = Field(default="", max_length=64)
+    source_commit: str = Field(default="", max_length=64)
+    build_id: str = Field(default="", max_length=128)
+    package_sha256: str = Field(default="", max_length=64)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
     flow_tab_present: bool = False
 
     @field_validator("protocol")
     @classmethod
     def _protocol(cls, value: str) -> str:
-        if value != PROTOCOL_VERSION:
+        if value not in SUPPORTED_PROTOCOLS:
             raise ValueError(f"unsupported protocol {value!r}")
         return value
 

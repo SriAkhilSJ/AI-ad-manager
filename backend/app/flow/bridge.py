@@ -33,6 +33,13 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
 from app.flow import protocol as proto
+from app.flow.provenance import (
+    ExtensionProvenance,
+    ProvenanceRejected,
+    UnsupportedProtocol,
+    provenance_from_hello,
+    verify_provenance,
+)
 from app.flow.coordinator import (
     CoordinatorError,
     FlowJob,
@@ -103,6 +110,9 @@ class BridgeConfig:
     max_live_jobs: int = 1
     export_max_bytes: int = 25 * 1024 * 1024
     live_generation_enabled: bool = False
+    #: Accept a package whose components sit on different release lines. Off by
+    #: default: that is exactly the drift the audit found upstream.
+    allow_component_drift: bool = False
 
     def validate(self) -> "BridgeConfig":
         assert_loopback_bind(self.host)  # raises LoopbackBindError
@@ -131,6 +141,9 @@ class ExtensionSession:
     flow_tab_present: bool = False
     authenticated: bool = False
     busy: bool = False
+    provenance: ExtensionProvenance | None = None
+    provenance_trusted: bool = False
+    provenance_warnings: tuple[str, ...] = ()
     pending: dict[str, asyncio.Future[proto.ResultEnvelope]] = field(default_factory=dict)
     task: asyncio.Task[None] | None = None
 
@@ -139,6 +152,11 @@ class ExtensionSession:
             "session_id": self.session_id,
             "extension_id": self.extension_id,
             "extension_version": self.extension_version,
+            "service_worker_version": self.provenance.service_worker_version if self.provenance else "",
+            "mcp_version": self.provenance.mcp_version if self.provenance else "",
+            "source_commit": self.provenance.source_commit if self.provenance else "",
+            "build_id": self.provenance.build_id if self.provenance else "",
+            "provenance_trusted": self.provenance_trusted,
             "flow_tab_present": self.flow_tab_present,
             "authenticated": self.authenticated,
             "busy": self.busy,
@@ -189,6 +207,8 @@ class FlowBridge:
             "ws_connections": 0,
             "ws_rejected_auth": 0,
             "ws_rejected_origin": 0,
+            "ws_rejected_provenance": 0,
+            "ws_rejected_protocol": 0,
             "ws_superseded": 0,
             "commands_sent": 0,
             "commands_denied": 0,
@@ -552,9 +572,16 @@ class FlowBridge:
                 await websocket.close(code=4401, reason="pairing required")
                 return
 
-            if not self._authenticate_hello(session, first):
-                self.stats["ws_rejected_auth"] += 1
-                await websocket.close(code=4401, reason="pairing required")
+            ok, close_code, reason = self._authenticate_hello(session, first)
+            if not ok:
+                if close_code == proto.WS_CLOSE_PROVENANCE:
+                    self.stats["ws_rejected_provenance"] += 1
+                elif close_code == proto.WS_CLOSE_PROTOCOL:
+                    self.stats["ws_rejected_protocol"] += 1
+                else:
+                    self.stats["ws_rejected_auth"] += 1
+                logger.info("flow_bridge_ws_refused code=%s reason=%s", close_code, reason)
+                await websocket.close(code=close_code, reason=reason[:120])
                 return
 
             session.authenticated = True
@@ -584,6 +611,8 @@ class FlowBridge:
                         "max_live_jobs": self.config.max_live_jobs,
                         "allowed_commands": list(proto.ALLOWED_COMMANDS),
                         "live_generation": False,
+                        "provenance_trusted": session.provenance_trusted,
+                        "provenance": session.provenance.as_dict() if session.provenance else {},
                     }
                 )
             )
@@ -601,32 +630,60 @@ class FlowBridge:
                 self.limiter.release()
             logger.info("flow_bridge_session_closed session=%s", session.session_id)
 
-    def _authenticate_hello(self, session: ExtensionSession, first: Any) -> bool:
+    def _authenticate_hello(
+        self, session: ExtensionSession, first: Any
+    ) -> tuple[bool, int, str]:
+        """Authenticate *and* prove provenance. Returns ``(ok, close_code, reason)``."""
         try:
             payload = json.loads(first if isinstance(first, str) else first.decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            logger.info("flow_bridge_ws_bad_hello")
+            return False, proto.WS_CLOSE_UNAUTHORIZED, "pairing required"
+
+        # Protocol first, so an old build gets an unambiguous "unsupported protocol"
+        # rather than a generic pairing failure.
+        presented = str(payload.get("protocol") or "") if isinstance(payload, dict) else ""
+        if presented not in proto.SUPPORTED_PROTOCOLS:
+            return False, proto.WS_CLOSE_PROTOCOL, "unsupported protocol"
+
+        try:
             hello = proto.HelloMessage.model_validate(payload)
         except Exception:  # noqa: BLE001
             logger.info("flow_bridge_ws_bad_hello")
-            return False
+            return False, proto.WS_CLOSE_UNAUTHORIZED, "pairing required"
 
         id_ok = constant_time_equals(hello.pairing_id, self.config.pairing_id)
         secret_ok = constant_time_equals(hello.pairing_secret, self.config.pairing_secret)
         if not (id_ok and secret_ok):
-            return False
+            return False, proto.WS_CLOSE_UNAUTHORIZED, "pairing required"
 
         if self.config.extension_ids:
             if hello.extension_id not in self.config.extension_ids:
                 logger.info("flow_bridge_ws_extension_not_allowed extension=%s", hello.extension_id or "-")
-                return False
+                return False, proto.WS_CLOSE_UNAUTHORIZED, "pairing required"
         elif hello.extension_id:
             # No allowlist configured means no extension is trusted yet.
             logger.info("flow_bridge_ws_extension_unlisted extension=%s", hello.extension_id[:32])
-            return False
+            return False, proto.WS_CLOSE_UNAUTHORIZED, "pairing required"
+
+        # Phase 3C.2 §10: a claimed version is not a proven one.
+        provenance = provenance_from_hello(hello)
+        try:
+            report = verify_provenance(
+                provenance, allow_component_drift=self.config.allow_component_drift
+            )
+        except UnsupportedProtocol as exc:
+            return False, proto.WS_CLOSE_PROTOCOL, exc.code
+        except ProvenanceRejected as exc:
+            return False, proto.WS_CLOSE_PROVENANCE, exc.code
 
         session.extension_id = hello.extension_id
         session.extension_version = hello.extension_version
         session.flow_tab_present = hello.flow_tab_present
-        return True
+        session.provenance = provenance
+        session.provenance_trusted = report.trusted
+        session.provenance_warnings = report.warnings
+        return True, 0, ""
 
     async def _ws_loop(self, session: ExtensionSession) -> None:
         async for message in session.websocket:
@@ -670,6 +727,9 @@ class FlowBridge:
             },
             "paired": self.paired,
             "session": self.session.as_dict() if self.session else None,
+            "provenance": self.session.provenance.as_dict() if self.session and self.session.provenance else None,
+            "provenance_trusted": bool(self.session and self.session.provenance_trusted),
+            "supported_protocols": list(proto.SUPPORTED_PROTOCOLS),
             "allowed_commands": list(proto.ALLOWED_COMMANDS),
             "denied_commands": sorted(proto.DENIED_COMMANDS),
             "denied_requests": list(self.denied_commands),
@@ -770,6 +830,7 @@ def bridge_config_from_settings(settings: Any) -> BridgeConfig:
         max_live_jobs=settings.flow_max_live_jobs,
         export_max_bytes=settings.flow_export_max_bytes,
         live_generation_enabled=False,
+        allow_component_drift=bool(getattr(settings, "flow_allow_component_drift", False)),
     )
 
 

@@ -191,6 +191,19 @@ class Settings(BaseSettings):
     #: One-time export tickets: short-lived, single-use, checksum-verified.
     flow_export_ttl_seconds: int = 900
     flow_export_max_bytes: int = 25 * 1024 * 1024
+    #: Bounded chunked transfer for large media (Phase 3C.2 §9). Each chunk is
+    #: checksummed and must arrive in order; the asset exists only after the
+    #: assembled bytes, and every chunk, verify.
+    flow_export_chunk_bytes: int = 8 * 1024 * 1024
+    flow_export_max_chunks: int = 4096
+
+    # ---- Phase 3C.2 provenance gate --------------------------------------
+    #: Accept a package whose components sit on different release lines. Off by
+    #: default: upstream ships manifest 1.2.1 with an MCP server at 1.0.0.
+    flow_allow_component_drift: bool = False
+    #: Where an authorised copy of the upstream package would live. Never
+    #: committed; only the *presence and licence* are reported by /flow/status.
+    flow_source_package_path: str = ""
     #: The companion reaches Crusor outbound; Crusor never dials the loopback port.
     flow_companion_id: str = ""
     flow_companion_secret: str = ""

@@ -264,6 +264,7 @@ async def request_generation(
         duration_seconds=payload.duration_seconds,
         reference_media_ids=payload.reference_media_ids,
         count=1,
+        idempotency_key=payload.idempotency_key,
     )
     binding = FlowGenerationBinding.from_brief(
         brief, request=command, provider="flow", model=payload.model
@@ -309,6 +310,8 @@ async def request_generation(
     return GenerationDecisionOut(
         authorized=True,
         dispatched=False,
+        lifecycle=proto.FlowLifecycle.NOT_SUBMITTED.value,
+        idempotency_key=payload.idempotency_key,
         live_generation_enabled=bool(settings.flow_live_generation_enabled),
         approval_id=record.id,
         approval_hash=record.flow_binding_hash,
@@ -366,6 +369,9 @@ async def create_export_ticket(
         expected_sha256=ticket.expected_sha256,
         declared_content_type=ticket.declared_content_type,
         max_bytes=ticket.max_bytes,
+        upload_mode=ticket.upload_mode,
+        chunk_bytes=int(settings.flow_export_chunk_bytes),
+        max_chunks=int(settings.flow_export_max_chunks),
         one_time=True,
     )
 
@@ -418,16 +424,86 @@ async def upload_export_bytes(
         actor_id=None,
     )
     await session.commit()
+    return _export_status(ticket, asset_id=asset.id)
+
+
+def _export_status(ticket: Any, *, asset_id: uuid.UUID | None = None) -> ExportStatusOut:
     return ExportStatusOut(
         id=ticket.id,
         status=ticket.status,
-        asset_id=asset.id,
+        asset_id=asset_id or ticket.asset_id,
         checksum=ticket.checksum,
         received_bytes=ticket.received_bytes,
         width=ticket.width,
         height=ticket.height,
+        upload_mode=ticket.upload_mode or "single",
+        chunk_count=int(ticket.chunk_count or 0),
+        chunks_received=int(ticket.chunks_received or 0),
+        complete=ticket.status == "consumed",
+        error_code=ticket.error_code,
+        error_message=ticket.error_message,
         consumed_at=ticket.consumed_at,
     )
+
+
+@router.post(
+    "/exports/{ticket_id}/chunks",
+    response_model=ExportStatusOut,
+    summary="Upload one bounded, checksummed chunk of a verified media export",
+)
+async def upload_export_chunk(
+    ticket_id: uuid.UUID,
+    request: Request,
+    session: DB,
+    x_companion_id: Annotated[str | None, Header(alias="X-Companion-Id")] = None,
+    x_companion_secret: Annotated[str | None, Header(alias="X-Companion-Secret")] = None,
+    x_export_token: Annotated[str | None, Header(alias="X-Export-Token")] = None,
+    x_chunk_index: Annotated[str | None, Header(alias="X-Chunk-Index")] = None,
+    x_chunk_count: Annotated[str | None, Header(alias="X-Chunk-Count")] = None,
+    x_chunk_sha256: Annotated[str | None, Header(alias="X-Chunk-Sha256")] = None,
+) -> ExportStatusOut:
+    settings = get_settings()
+    gateway = FlowCompanionGateway(session, settings)
+    try:
+        companion_id = gateway.authenticate(x_companion_id, x_companion_secret)
+    except CompanionAuthError as exc:
+        raise AuthenticationError(exc.message) from exc
+
+    if not x_export_token:
+        raise ValidationProblem("The one-time export token is required in X-Export-Token.")
+    try:
+        index = int(x_chunk_index or "")
+        total = int(x_chunk_count or "")
+    except ValueError as exc:
+        raise ValidationProblem("X-Chunk-Index and X-Chunk-Count must be integers.") from exc
+
+    limit = int(settings.flow_export_chunk_bytes or 8 * 1024 * 1024)
+    declared_length = request.headers.get("content-length")
+    if declared_length and declared_length.isdigit() and int(declared_length) > limit:
+        raise ValidationProblem(f"A chunk may not exceed {limit} bytes.")
+
+    buffer = bytearray()
+    async for chunk in request.stream():
+        buffer.extend(chunk)
+        if len(buffer) > limit:
+            raise ValidationProblem(f"A chunk may not exceed {limit} bytes.")
+    if not buffer:
+        raise ValidationProblem("The chunk was empty.")
+
+    service = FlowAssetExportService(session, settings, get_storage(settings))
+    await service.get_ticket(ticket_id)  # the token must belong to *this* ticket
+    ticket, _asset = await service.accept_chunk(
+        token=x_export_token,
+        index=index,
+        total=total,
+        chunk_sha256=x_chunk_sha256 or "",
+        data=bytes(buffer),
+        companion_id=companion_id,
+    )
+    if ticket.id != ticket_id:
+        raise ValidationProblem("The export token belongs to a different ticket.")
+    await session.commit()
+    return _export_status(ticket)
 
 
 @router.get(
@@ -439,19 +515,7 @@ async def get_export_ticket(
     ticket_id: uuid.UUID, session: DB, user: CurrentUser
 ) -> ExportStatusOut:
     service = FlowAssetExportService(session, get_settings(), get_storage(get_settings()))
-    ticket = await service.get_ticket(ticket_id)
-    return ExportStatusOut(
-        id=ticket.id,
-        status=ticket.status,
-        asset_id=ticket.asset_id,
-        checksum=ticket.checksum,
-        received_bytes=ticket.received_bytes,
-        width=ticket.width,
-        height=ticket.height,
-        error_code=ticket.error_code,
-        error_message=ticket.error_message,
-        consumed_at=ticket.consumed_at,
-    )
+    return _export_status(await service.get_ticket(ticket_id))
 
 
 @router.post(

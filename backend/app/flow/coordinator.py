@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Awaitable, Callable, Literal, Protocol
 
+from app.flow import protocol as proto
 from app.flow.protocol import (
     CommandEnvelope,
     ErrorDescriptor,
@@ -128,6 +129,39 @@ class ExportUnverified(CoordinatorError):
     code = FlowErrorCode.EXPORT_UNVERIFIED.value
 
 
+class IdempotencyConflict(CoordinatorError):
+    """The same idempotency key was reused for a different request (3C.2 §8)."""
+
+    code = "flow_idempotency_conflict"
+
+    def __init__(self, key: str, *, job_id: str = "") -> None:
+        super().__init__(
+            "This idempotency key already belongs to a different generation request. "
+            "Use a new key for a new prompt, or replay the original request unchanged.",
+            details={"idempotency_key": key[:64], "job_id": job_id},
+        )
+
+
+class CancellationAmbiguous(CoordinatorError):
+    """A job was already dispatched, so cancelling cannot undo the attempt."""
+
+    code = "flow_cancel_ambiguous"
+
+    def __init__(self, job_id: str, state: str) -> None:
+        super().__init__(
+            "This generation was already dispatched. Cancelling it locally cannot prove "
+            "Google did not start it, so the job is marked UNKNOWN_SUBMISSION and must "
+            "be reconciled rather than retried.",
+            details={"job_id": job_id, "state": state},
+        )
+
+
+class ReconciliationRejected(CoordinatorError):
+    """Evidence offered for a job does not actually belong to that job."""
+
+    code = "flow_reconciliation_rejected"
+
+
 class CommandTransport(Protocol):
     """The only I/O the coordinator needs. The bridge implements it over WS."""
 
@@ -159,6 +193,11 @@ class FlowJob:
     updated_at: datetime = field(default_factory=utcnow)
 
     @property
+    def lifecycle(self) -> proto.FlowLifecycle:
+        """Canonical eight-state view of this job (Phase 3C.2 §8)."""
+        return proto.lifecycle_for(self.state)
+
+    @property
     def terminal(self) -> bool:
         return self.state in TERMINAL_SUBMISSION_STATES
 
@@ -171,6 +210,7 @@ class FlowJob:
             "job_id": self.job_id,
             "kind": self.kind,
             "state": self.state.value,
+            "lifecycle": self.lifecycle.value,
             "dispatched": self.dispatched,
             "attempts": self.attempts,
             "prompt_hash": self.request.prompt_hash(),
@@ -225,6 +265,9 @@ class GenerationCoordinator:
         #: media id -> owning job. A tile belongs to exactly one job, so a stale or
         #: unrelated tile in another tab can never be claimed as this job's output.
         self._media_owner: dict[str, str] = {}
+        #: idempotency key -> (job id, request hash). A key may only ever map to one
+        #: request; reuse with a different payload is refused, not silently merged.
+        self._by_idempotency: dict[str, tuple[str, str]] = {}
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ views
@@ -239,11 +282,18 @@ class GenerationCoordinator:
     def get(self, job_id: str) -> FlowJob | None:
         return self._jobs.get(job_id)
 
+    def lifecycle_counts(self) -> dict[str, int]:
+        counts = {state.value: 0 for state in proto.FlowLifecycle}
+        for job in self._jobs.values():
+            counts[job.lifecycle.value] += 1
+        return counts
+
     def snapshot(self) -> dict[str, Any]:
         return {
             "live_generation_enabled": self.live_generation_enabled,
             "max_live_jobs": self.max_live_jobs,
             "live_jobs": len(self.live_jobs),
+            "lifecycle_counts": self.lifecycle_counts(),
             "jobs": [job.as_dict() for job in self.jobs[:20]],
         }
 
@@ -255,8 +305,16 @@ class GenerationCoordinator:
         *,
         approval_binding: str,
         job_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> FlowJob:
-        """Send exactly one attempt. Never loops, never rewrites the prompt."""
+        """Send exactly one attempt. Never loops, never rewrites the prompt.
+
+        ``idempotency_key`` is the duplicate-paid-generation guard from Phase 3C.2
+        §8: one key maps to one request for the lifetime of the coordinator. Reuse
+        with an identical payload replays the existing job and writes nothing to the
+        socket; reuse with a different payload is refused outright rather than
+        silently folding two different generations into one approval.
+        """
         if not self.live_generation_enabled:
             # Checked before anything touches a transport: no request is built,
             # no command is written, no socket is opened.
@@ -264,8 +322,18 @@ class GenerationCoordinator:
         if not approval_binding:
             raise ApprovalRequired()
 
+        key = (idempotency_key or request.idempotency_key or "").strip()
+        request_hash = request.request_hash()
+
         async with self._lock:
-            replay = self._by_request.get(request.request_hash())
+            if key:
+                existing = self._by_idempotency.get(key)
+                if existing is not None:
+                    existing_job_id, existing_hash = existing
+                    if existing_hash != request_hash:
+                        raise IdempotencyConflict(key, job_id=existing_job_id)
+                    return self._jobs[existing_job_id]
+            replay = self._by_request.get(request_hash)
             if replay:
                 return self._jobs[replay]
             if self.live_jobs:
@@ -281,7 +349,9 @@ class GenerationCoordinator:
                 updated_at=self.clock(),
             )
             self._jobs[job.job_id] = job
-            self._by_request[request.request_hash()] = job.job_id
+            self._by_request[request_hash] = job.job_id
+            if key:
+                self._by_idempotency[key] = (job.job_id, request_hash)
 
         envelope = CommandEnvelope(
             id=new_id(),
@@ -447,7 +517,10 @@ class GenerationCoordinator:
                     raise ForeignResult("status answer carried a foreign media id", job_id=job.job_id)
                 self._claim_media(job, media_id)
             job.result = payload
-            if status in {"failed", "error"}:
+            if status in {"running", "in_progress", "queued"}:
+                proto.transition(job.lifecycle, proto.FlowLifecycle.RUNNING)
+                job.state = SubmissionState.RUNNING
+            elif status in {"failed", "error"}:
                 job.state = SubmissionState.FAILED
                 job.error = ErrorDescriptor(
                     FlowErrorCode.COMMAND_FAILED, "The provider reported a failed generation."
@@ -520,6 +593,125 @@ class GenerationCoordinator:
         except Exception as exc:  # noqa: BLE001
             return self._mark_unknown(job, f"transport failed after retry ({type(exc).__name__})")
         return self._apply_submission_result(job, result)
+
+    # ---------------------------------------------------------------- cancel
+    async def cancel(self, job_id: str) -> FlowJob:
+        """Stop tracking a job without ever implying the provider did not start it.
+
+        * ``NOT_SUBMITTED`` — nothing was dispatched, so ``CANCELLED`` is a fact.
+        * ``SUBMITTING`` — the frame left the socket; raising
+          :class:`CancellationAmbiguous` after marking it ``UNKNOWN_SUBMISSION`` is
+          the only honest answer, because a local cancel cannot recall a submit.
+        * ``SUBMITTED``/``RUNNING`` — Google has the job. It is marked ``CANCELLED``
+          for Crusor's purposes with an explicit note that the provider may still
+          finish, and it is not retryable.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise CoordinatorError("Unknown Flow job.", details={"job_id": job_id})
+        if job.terminal:
+            raise CoordinatorError(
+                "This job is already terminal.", details={"state": job.state.value}
+            )
+
+        if job.state is SubmissionState.DISPATCHED:
+            job.state = SubmissionState.UNKNOWN_SUBMISSION
+            job.error = ErrorDescriptor(
+                FlowErrorCode.UNKNOWN_SUBMISSION,
+                "Cancelled while the submit was in flight. The outcome is unknown and "
+                "will not be resubmitted automatically.",
+                retryable=False,
+                details={"reason": "cancelled_during_submit"},
+            )
+            job.updated_at = self.clock()
+            raise CancellationAmbiguous(job.job_id, job.state.value)
+
+        if job.state in {SubmissionState.SUBMITTED, SubmissionState.RUNNING}:
+            job.state = SubmissionState.CANCELLED
+            job.error = ErrorDescriptor(
+                FlowErrorCode.COMMAND_FAILED,
+                "Cancelled after submission. The provider may still complete the "
+                "generation; any media that appears is not attached automatically.",
+                retryable=False,
+                details={"provider_may_still_complete": True},
+            )
+        else:
+            job.state = SubmissionState.CANCELLED
+            job.error = None
+        job.updated_at = self.clock()
+        return job
+
+    # ----------------------------------------------------------- reconcile
+    def reconcile(
+        self,
+        job_id: str,
+        *,
+        request_hash: str = "",
+        media_id: str = "",
+        status: str = "",
+        evidence_source: str = "operator",
+    ) -> FlowJob:
+        """Attach verified evidence to a job. Success needs a *correlated* media id.
+
+        Reconciliation is the only path out of ``UNKNOWN_SUBMISSION``, and it is
+        deliberately one-way: it can confirm a success when the evidence carries a
+        media id belonging to this job, and it can leave the job unknown. It never
+        manufactures a failure, because a manufactured failure is a retry, and a
+        retry of an ambiguous submit is a second billable generation.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise CoordinatorError("Unknown Flow job.", details={"job_id": job_id})
+        if request_hash and request_hash != job.request_hash:
+            raise ReconciliationRejected(
+                "The evidence belongs to a different request.",
+                details={"job_id": job_id},
+            )
+
+        if media_id:
+            if not _MEDIA_ID_PATTERN.match(media_id):
+                raise ReconciliationRejected(
+                    "The media id in the evidence is malformed.", details={"job_id": job_id}
+                )
+            try:
+                self._claim_media(job, media_id)
+            except ForeignResult as exc:
+                raise ReconciliationRejected(
+                    "That media id already belongs to another job, so it cannot "
+                    "confirm this one.",
+                    details={"job_id": job_id, **exc.details},
+                ) from exc
+
+        normalised = status.strip().lower()
+        if normalised in {"succeeded", "completed", "ready"}:
+            if not job.media_id:
+                job.result = {**job.result, "reconciliation": "refused_without_media_id"}
+                job.updated_at = self.clock()
+                raise ReconciliationRejected(
+                    "A success claim needs a correlated media id; none was supplied.",
+                    details={"job_id": job_id},
+                )
+            if job.state is SubmissionState.UNKNOWN_SUBMISSION:
+                proto.transition(job.lifecycle, proto.FlowLifecycle.SUCCEEDED)
+            job.state = SubmissionState.COMPLETED
+            job.error = None
+            job.result = {
+                **job.result,
+                "reconciled": True,
+                "evidence_source": evidence_source,
+                "status": normalised,
+            }
+            job.updated_at = self.clock()
+            return job
+
+        job.result = {
+            **job.result,
+            "reconciliation": "inconclusive",
+            "evidence_source": evidence_source,
+            "status": normalised,
+        }
+        job.updated_at = self.clock()
+        return job
 
     # ---------------------------------------------------------------- export
     async def export(self, job_id: str) -> ExportPayload:

@@ -125,7 +125,12 @@ async def _extension(bridge: FlowBridge, pairing: dict[str, str], **hello_extras
                 "pairing_id": pairing["id"],
                 "pairing_secret": pairing["secret"],
                 "extension_id": EXT_ID,
-                "extension_version": "1.2.1",
+                "extension_version": "1.3.0",
+                # Phase 3C.2 requires proven provenance, not a claimed version.
+                "service_worker_version": "1.3.0",
+                "mcp_version": "1.3.0",
+                "source_commit": "0343884",
+                "build_id": "acceptance-build-1",
                 "flow_tab_present": True,
                 **hello_extras,
             }
@@ -1473,7 +1478,7 @@ class FakeBridge:
             "limits": {"max_request_bytes": 65536},
             "session": {
                 "extension_id": EXT_ID,
-                "extension_version": "1.2.1",
+                "extension_version": "1.3.0",
                 "flow_tab_present": True,
             },
         }

@@ -25,6 +25,7 @@ Exit code 0 means every criterion passed.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -84,6 +85,67 @@ class Http:
                     f"{method} {path} -> {status} (expected {allowed}): {payload}"
                 )
         return status, payload
+
+
+
+def minimal_png(width: int = 48, height: int = 48) -> bytes:
+    """A real, decodable RGB PNG with incompressible-ish pixels (deterministic)."""
+    import struct
+    import zlib
+
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)  # filter type 0
+        for x in range(width):
+            digest = hashlib.sha256(f"{x}:{y}".encode()).digest()
+            raw += digest[:3]
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr)
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+        + chunk(b"IEND", b"")
+    )
+
+
+def put_chunk(
+    http: Http,
+    ticket_id: str,
+    token: str,
+    headers: dict[str, str],
+    index: int,
+    total: int,
+    data: bytes,
+    *,
+    chunk_sha: str | None = None,
+) -> tuple[int, dict | None]:
+    """Upload one raw chunk. ``Http.call`` is JSON-only, so this speaks urllib."""
+    url = f"{http.base}{API}/flow/exports/{ticket_id}/chunks"
+    hdrs = {
+        "accept": "application/json",
+        "content-type": "application/octet-stream",
+        "X-Export-Token": token,
+        "X-Chunk-Index": str(index),
+        "X-Chunk-Count": str(total),
+        "X-Chunk-Sha256": chunk_sha or hashlib.sha256(data).hexdigest(),
+        **headers,
+    }
+    request = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        status, raw = exc.code, exc.read()
+    return status, (json.loads(raw) if raw else None)
 
 
 @dataclass
@@ -1940,6 +2002,349 @@ def main() -> int:
         )
 
     harness.check("53. The local companion has a safe executable module entry point", c53)
+
+    # ---- Phase 3C.2: upstream remediation gate + receiver-side contract -----
+    def c54() -> str:
+        """The source/licensing gate fails closed and nothing upstream is vendored."""
+        _, status = http.call("GET", f"{flow}/status", expect=200)
+        gate = status["source_gate"]
+        assert gate["status"] == "SOURCE_ABSENT", gate["status"]
+        assert gate["authorized_to_modify"] is False
+        assert gate["can_vendor_source"] is False
+        assert gate["upstream_remediation_allowed"] is False
+        requirements = [row["blocker"] for row in gate["remediation_requirements"]]
+        assert requirements == [f"U{i}" for i in range(1, 8)], requirements
+        assert all(row["file"] and row["requirement"] for row in gate["remediation_requirements"])
+
+        audit = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "scripts" / "flow_source_audit.py")],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        assert audit.returncode == 3, f"audit script returned {audit.returncode}"
+        report = json.loads(audit.stdout)
+        assert report["status"] == "SOURCE_ABSENT"
+        assert report["scans_run"] == []
+        assert report["authorized"] is False
+
+        vendored = [
+            name
+            for name in ("content-script-main.js", "service-worker.js", "ws-bridge.js")
+            if list(BACKEND.rglob(name))
+        ]
+        assert vendored == [], f"upstream files vendored into the repository: {vendored}"
+        return (
+            "source gate reports SOURCE_ABSENT (no licence, no permission); the audit "
+            "scanner exits 3 without running scans; 7 remediation requirements recorded; "
+            "no upstream file exists in the repo"
+        )
+
+    harness.check("54. Upstream source/licensing gate fails closed", c54)
+
+    def c55() -> str:
+        """Provenance is proven, not claimed: the bridge refuses inconsistent builds."""
+        code = (
+            "import asyncio, json\n"
+            "import websockets\n"
+            "from app.flow.bridge import BridgeConfig, FlowBridge\n"
+            "from app.flow.security import generate_pairing_id, generate_pairing_secret\n"
+            "EXT = 'abcdefghijklmnopabcdefghijklmnop'\n"
+            "BASE = {'type': 'hello', 'protocol': 'flow.bridge.v1', 'extension_id': EXT,\n"
+            "        'extension_version': '1.3.0', 'service_worker_version': '1.3.0',\n"
+            "        'mcp_version': '1.3.0', 'source_commit': '0343884',\n"
+            "        'build_id': 'acceptance-build-1', 'flow_tab_present': True}\n"
+            "async def attempt(bridge, frame):\n"
+            "    ws = await websockets.connect(f'ws://127.0.0.1:{bridge.ws_port}/ws')\n"
+            "    try:\n"
+            "        await ws.send(json.dumps(frame))\n"
+            "        try:\n"
+            "            first = await asyncio.wait_for(ws.recv(), 3)\n"
+            "            return {'ack': json.loads(first)}\n"
+            "        except websockets.ConnectionClosed as exc:\n"
+            "            return {'close': exc.rcvd.code if exc.rcvd else 0}\n"
+            "    finally:\n"
+            "        await ws.close()\n"
+            "async def main():\n"
+            "    pid, secret = generate_pairing_id(), generate_pairing_secret()\n"
+            "    bridge = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
+            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0))\n"
+            "    await bridge.start()\n"
+            "    auth = {'pairing_id': pid, 'pairing_secret': secret}\n"
+            "    out = {}\n"
+            "    good = await attempt(bridge, {**BASE, **auth})\n"
+            "    out['ack'] = good.get('ack', {}).get('type')\n"
+            "    out['trusted'] = good.get('ack', {}).get('provenance_trusted')\n"
+            "    out['build_id'] = good.get('ack', {}).get('provenance', {}).get('build_id')\n"
+            "    await bridge.stop()\n"
+            "    bridge2 = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
+            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0))\n"
+            "    await bridge2.start()\n"
+            "    out['version_split'] = (await attempt(bridge2, {**BASE, **auth,\n"
+            "        'extension_version': '1.2.1', 'service_worker_version': '1.2.0',\n"
+            "        'mcp_version': '1.0.0'})).get('close')\n"
+            "    out['old_protocol'] = (await attempt(bridge2, {**BASE, **auth,\n"
+            "        'protocol': 'flow.bridge.v0'})).get('close')\n"
+            "    out['no_commit'] = (await attempt(bridge2, {**BASE, **auth,\n"
+            "        'source_commit': ''})).get('close')\n"
+            "    out['paired_after_refusals'] = bridge2.paired\n"
+            "    await bridge2.stop()\n"
+            "    print(json.dumps(out))\n"
+            "asyncio.run(main())\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr[-1200:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["ack"] == "hello_ack", result
+        assert result["trusted"] is True, result
+        assert result["build_id"] == "acceptance-build-1", result
+        assert result["version_split"] == 4422, result
+        assert result["old_protocol"] == 4426, result
+        assert result["no_commit"] == 4422, result
+        assert result["paired_after_refusals"] is False, result
+        return (
+            "consistent build accepted with build_id provenance; 1.2.1/1.2.0/1.0.0 split "
+            "closed 4422; unsupported protocol closed 4426; missing commit closed 4422; "
+            "bridge still unpaired"
+        )
+
+    harness.check("55. Extension provenance is verified, not trusted", c55)
+
+    def c56() -> str:
+        """A real chunked export lands verified bytes; bad chunk sequences do not."""
+        media = minimal_png(48, 48)
+        checksum = hashlib.sha256(media).hexdigest()
+        companion_headers = {
+            "X-Companion-Id": "acceptance-companion",
+            "X-Companion-Secret": os.environ.get("FLOW_COMPANION_SECRET", ""),
+        }
+        assert companion_headers["X-Companion-Secret"], (
+            "FLOW_COMPANION_SECRET must be configured for the chunked export check"
+        )
+
+        _, ticket = http.call(
+            "POST",
+            f"{flow}/exports",
+            {
+                "companion_id": "acceptance-companion",
+                "expected_sha256": checksum,
+                "content_type": "image/png",
+                "filename": "acceptance-chunked.png",
+            },
+        )
+        assert ticket.get("upload_token"), ticket
+
+        chunk_size = 4096
+        chunks = [media[i : i + chunk_size] for i in range(0, len(media), chunk_size)]
+        status_body: dict = {}
+        for index, chunk in enumerate(chunks):
+            code, status_body = put_chunk(
+                http,
+                ticket["id"],
+                ticket["upload_token"],
+                companion_headers,
+                index,
+                len(chunks),
+                chunk,
+            )
+            assert code == 200, (code, status_body)
+            assert status_body["chunks_received"] == index + 1, status_body
+
+        _, final = http.call("GET", f"{flow}/exports/{ticket['id']}", expect=200)
+        assert final["status"] == "consumed", final
+        assert final["checksum"] == checksum
+        assert final["chunks_received"] == len(chunks)
+        assert final["asset_id"]
+
+        # A second ticket: out-of-order and corrupt chunks must not create an asset.
+        _, broken = http.call(
+            "POST",
+            f"{flow}/exports",
+            {"companion_id": "acceptance-companion", "filename": "acceptance-broken.png"},
+        )
+        out_of_order, _ = put_chunk(
+            http,
+            broken["id"],
+            broken["upload_token"],
+            companion_headers,
+            1,
+            2,
+            chunks[0],
+        )
+        corrupt, _ = put_chunk(
+            http,
+            broken["id"],
+            broken["upload_token"],
+            companion_headers,
+            0,
+            2,
+            b"not the declared bytes",
+            chunk_sha=hashlib.sha256(b"something else").hexdigest(),
+        )
+        _, broken_state = http.call("GET", f"{flow}/exports/{broken['id']}", expect=200)
+        assert out_of_order == 422, out_of_order
+        assert corrupt == 422, corrupt
+        assert broken_state["asset_id"] is None, broken_state
+        assert broken_state["chunks_received"] == 0, broken_state
+        assert broken_state["status"] != "consumed", broken_state
+
+        # One-time means one time: the consumed ticket cannot be replayed.
+        replay, _ = put_chunk(
+            http,
+            ticket["id"],
+            ticket["upload_token"],
+            companion_headers,
+            0,
+            len(chunks),
+            chunks[0],
+        )
+        assert replay == 422, replay
+        return (
+            f"{len(chunks)} chunks assembled into a verified asset ({checksum[:16]}…, "
+            f"{final['received_bytes']} bytes); out-of-order chunk rejected {out_of_order}, "
+            f"corrupt chunk rejected {corrupt}, no bytes accepted for the broken ticket, "
+            f"consumed ticket replay rejected {replay}"
+        )
+
+    harness.check("56. Chunked asset export verifies bytes and rejects bad sequences", c56)
+
+    def c57() -> str:
+        """Duplicate keys, cancellation and reconciliation cannot create a second generation."""
+        code = (
+            "import asyncio, json\n"
+            "from app.flow import protocol as proto\n"
+            "from app.flow.coordinator import (CancellationAmbiguous, GenerationCoordinator,\n"
+            "    IdempotencyConflict, ReconciliationRejected)\n"
+            "class Transport:\n"
+            "    def __init__(self):\n"
+            "        self.sent = []\n"
+            "        self.futures = {}\n"
+            "    async def send(self, envelope):\n"
+            "        self.sent.append(envelope)\n"
+            "        fut = asyncio.get_running_loop().create_future()\n"
+            "        fut.set_result(proto.ResultEnvelope(type='result', id='c', ok=True,\n"
+            "            job_id='', result={'media_id': 'media-0001'}))\n"
+            "        self.futures[envelope.id] = fut\n"
+            "    async def await_result(self, command_id, timeout):\n"
+            "        return await asyncio.wait_for(self.futures[command_id], timeout)\n"
+            "def request(prompt='frame', key=''):\n"
+            "    return proto.GenerationCommand(prompt=prompt, model='imagen-3', count=1,\n"
+            "        idempotency_key=key)\n"
+            "async def main():\n"
+            "    out = {}\n"
+            "    t = Transport()\n"
+            "    c = GenerationCoordinator(t, live_generation_enabled=True)\n"
+            "    a = await c.submit('image', request(), approval_binding='a'*64, idempotency_key='k')\n"
+            "    b = await c.submit('image', request(), approval_binding='a'*64, idempotency_key='k')\n"
+            "    out['replay_same_job'] = a.job_id == b.job_id\n"
+            "    out['sends_after_replay'] = len(t.sent)\n"
+            "    try:\n"
+            "        await c.submit('image', request('different'), approval_binding='a'*64,\n"
+            "            idempotency_key='k')\n"
+            "        out['conflict'] = 'NOT_RAISED'\n"
+            "    except IdempotencyConflict as exc:\n"
+            "        out['conflict'] = exc.code\n"
+            "    out['sends_after_conflict'] = len(t.sent)\n"
+            "    out['lifecycle'] = a.lifecycle.value\n"
+            "    out['states'] = [s.value for s in proto.FlowLifecycle]\n"
+            "    try:\n"
+            "        proto.transition(proto.FlowLifecycle.UNKNOWN_SUBMISSION,\n"
+            "            proto.FlowLifecycle.NOT_SUBMITTED)\n"
+            "        out['rearm'] = 'ALLOWED'\n"
+            "    except proto.IllegalTransition:\n"
+            "        out['rearm'] = 'refused'\n"
+            "    t2 = Transport()\n"
+            "    c2 = GenerationCoordinator(t2, live_generation_enabled=True)\n"
+            "    job = await c2.submit('image', request('second'), approval_binding='b'*64)\n"
+            "    await c2.cancel(job.job_id)\n"
+            "    out['cancelled'] = job.lifecycle.value\n"
+            "    out['provider_may_complete'] = bool(job.error and\n"
+            "        job.error.details.get('provider_may_still_complete'))\n"
+            "    unknown = FlowJobUnknown = None\n"
+            "    from app.flow.coordinator import FlowJob\n"
+            "    pending = FlowJob(job_id='job-x', kind='image', request=request('third'),\n"
+            "        approval_binding='c'*64, state=proto.SubmissionState.UNKNOWN_SUBMISSION)\n"
+            "    c2._jobs['job-x'] = pending\n"
+            "    try:\n"
+            "        c2.reconcile('job-x', status='succeeded')\n"
+            "        out['fake_success'] = 'ALLOWED'\n"
+            "    except ReconciliationRejected:\n"
+            "        out['fake_success'] = 'refused'\n"
+            "    out['still_unknown'] = pending.lifecycle.value\n"
+            "    print(json.dumps(out))\n"
+            "asyncio.run(main())\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr[-1200:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["replay_same_job"] is True, result
+        assert result["sends_after_replay"] == 1, result
+        assert result["conflict"] == "flow_idempotency_conflict", result
+        assert result["sends_after_conflict"] == 1, result
+        assert result["lifecycle"] == "SUBMITTED", result
+        assert result["states"][0] == "NOT_SUBMITTED" and len(result["states"]) == 8, result
+        assert result["rearm"] == "refused", result
+        assert result["cancelled"] == "CANCELLED", result
+        assert result["provider_may_complete"] is True, result
+        assert result["fake_success"] == "refused", result
+        assert result["still_unknown"] == "UNKNOWN_SUBMISSION", result
+        return (
+            "duplicate key replayed with one dispatch; conflicting key "
+            "flow_idempotency_conflict; UNKNOWN_SUBMISSION cannot be re-armed; cancel after "
+            "submit reports provider_may_still_complete; a success claim without a media id "
+            "is refused and the job stays UNKNOWN_SUBMISSION"
+        )
+
+    harness.check("57. Duplicate keys and ambiguous submits cannot duplicate generation", c57)
+
+    def c58() -> str:
+        """The Phase 3C.1 security boundary survived the Phase 3C.2 changes."""
+        def number(name: str) -> int | None:
+            head = name.split(".")[0].strip()
+            digits = "".join(ch for ch in head if ch.isdigit())
+            return int(digits) if digits else None
+
+        earlier = [name for name, _ok, _detail in harness.results if 47 < (number(name) or 99) < 58]
+        failed = [
+            name
+            for name, ok, _detail in harness.results
+            if 47 < (number(name) or 99) < 58 and not ok
+        ]
+        assert not failed, f"Phase 3C.1 criteria regressed: {failed}"
+        assert len(earlier) >= 6, f"expected the 3C.1 criteria, ran {len(earlier)}"
+        _, status = http.call("GET", f"{flow}/status", expect=200)
+        assert status["bridge"]["bind_host"] == "127.0.0.1"
+        assert status["bridge"]["command_allowlist"] == [
+            "status",
+            "generate_image",
+            "generate_video",
+            "check_video_status",
+            "export_asset",
+        ]
+        assert status["token_policy"]["page_visible_tokens"] is False
+        assert status["live_generation_enabled"] is False
+        return (
+            f"all {len(earlier)} Phase 3C.1 criteria still pass; allowlist, loopback bind, "
+            "token policy and live-generation-off unchanged"
+        )
+
+    harness.check("58. Phase 3C.1 boundary is intact", c58)
 
 
     # ---- summary ---------------------------------------------------------

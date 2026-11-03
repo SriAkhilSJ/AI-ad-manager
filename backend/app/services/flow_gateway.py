@@ -23,6 +23,7 @@ called.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
@@ -38,6 +39,7 @@ from app.core.errors import IntegrationUnavailableError, NotFoundError, Validati
 from app.creative.media import inspect_media
 from app.flow import protocol as proto
 from app.flow.security import constant_time_equals, secret_fingerprint
+from app.flow.source_gate import source_gate_payload
 from app.models.content import ContentItem
 from app.models.creative import CreativeAsset, CreativeKind
 from app.models.creative_brief import CreativeBrief
@@ -382,22 +384,15 @@ class FlowAssetExportService:
         )
         return ticket, token
 
-    async def accept_upload(
-        self,
-        *,
-        token: str,
-        data: bytes,
-        companion_id: str,
-        declared_content_type: str = "",
-        actor_id: uuid.UUID | None = None,
-    ) -> tuple[FlowAssetExport, CreativeAsset]:
+    async def _usable_ticket(
+        self, token: str, companion_id: str, *, incoming_bytes: int = 0
+    ) -> tuple[FlowAssetExport, Any]:
+        """Load a ticket and enforce single-use, TTL, owner and size before bytes land."""
         ticket = await self._ticket_for_token(token)
         now = _now()
 
         if ticket.status != "pending":
-            raise ValidationProblem(
-                "This export ticket has already been used.", 
-            )
+            raise ValidationProblem("This export ticket has already been used.")
         expires = _aware(ticket.expires_at)
         if expires is not None and expires <= now:
             ticket.status = "expired"
@@ -407,13 +402,205 @@ class FlowAssetExportService:
             raise ValidationProblem("This export ticket has expired.")
         if ticket.companion_id and ticket.companion_id != companion_id:
             raise ValidationProblem("This export ticket belongs to a different companion.")
-        if len(data) > int(ticket.max_bytes or 0) > 0:
+        if incoming_bytes > int(ticket.max_bytes or 0) > 0:
             ticket.status = "failed"
             ticket.error_code = "export_too_large"
-            ticket.error_message = f"Uploaded {len(data)} bytes, limit {ticket.max_bytes}."
+            ticket.error_message = f"Uploaded {incoming_bytes} bytes, limit {ticket.max_bytes}."
             await self.session.flush()
             raise ValidationProblem("The upload exceeds the ticket's size limit.")
+        return ticket, now
 
+    async def accept_upload(
+        self,
+        *,
+        token: str,
+        data: bytes,
+        companion_id: str,
+        declared_content_type: str = "",
+        actor_id: uuid.UUID | None = None,
+    ) -> tuple[FlowAssetExport, CreativeAsset]:
+        ticket, now = await self._usable_ticket(token, companion_id, incoming_bytes=len(data))
+        if ticket.upload_mode == "chunked" and int(ticket.chunks_received or 0):
+            raise ValidationProblem(
+                "This ticket is receiving a chunked upload; finish it with chunks."
+            )
+        return await self._finalise(
+            ticket,
+            data,
+            now=now,
+            declared_content_type=declared_content_type or ticket.declared_content_type,
+            actor_id=actor_id,
+            transfer="single",
+        )
+
+    async def accept_chunk(
+        self,
+        *,
+        token: str,
+        index: int,
+        total: int,
+        chunk_sha256: str,
+        data: bytes,
+        companion_id: str,
+        actor_id: uuid.UUID | None = None,
+        max_chunk_bytes: int | None = None,
+        max_chunks: int | None = None,
+    ) -> tuple[FlowAssetExport, CreativeAsset | None]:
+        """Accept one bounded chunk, assembling the asset only when the set completes.
+
+        The order is strict (``index == chunks_received``), so a reordered, missing,
+        duplicated or corrupted chunk cannot produce a valid asset: the sequence
+        either completes exactly once, in order, with every chunk hashing to what
+        the caller declared — or the ticket fails.
+        """
+        limit = int(max_chunk_bytes or self.settings.flow_export_chunk_bytes or 8 * 1024 * 1024)
+        ceiling = int(max_chunks or self.settings.flow_export_max_chunks or 4096)
+
+        if total < 1 or total > ceiling:
+            raise ValidationProblem(f"Chunk count must be between 1 and {ceiling}.")
+        if index < 0 or index >= total:
+            raise ValidationProblem("The chunk index is outside the announced range.")
+        if len(data) == 0:
+            raise ValidationProblem("An empty chunk is not accepted.")
+        if len(data) > limit:
+            raise ValidationProblem(f"A chunk may not exceed {limit} bytes.")
+        if not re.fullmatch(r"[0-9a-f]{64}", (chunk_sha256 or "").lower()):
+            raise ValidationProblem("X-Chunk-Sha256 must be a lowercase SHA-256.")
+
+        ticket, now = await self._usable_ticket(token, companion_id, incoming_bytes=len(data))
+        if ticket.upload_mode == "single" and int(ticket.chunks_received or 0) == 0:
+            if ticket.status != "pending":
+                raise ValidationProblem("This export ticket has already been used.")
+        received = int(ticket.chunks_received or 0)
+        if ticket.upload_mode == "chunked" and ticket.chunk_count and int(ticket.chunk_count) != total:
+            raise ValidationProblem("The chunk count does not match this upload.")
+        if index < received:
+            raise ValidationProblem("This chunk was already received (duplicate index).")
+        if index > received:
+            raise ValidationProblem(
+                f"Chunks must arrive in order: expected index {received}, got {index}."
+            )
+
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != chunk_sha256.lower():
+            await self._fail(ticket, "chunk_checksum_mismatch", "A chunk did not match its checksum.")
+            raise ValidationProblem("The chunk does not match the checksum in X-Chunk-Sha256.")
+
+        projected = int(ticket.received_bytes or 0) + len(data)
+        if int(ticket.max_bytes or 0) and projected > int(ticket.max_bytes):
+            await self._fail(ticket, "export_too_large", "The assembled asset would exceed the limit.")
+            raise ValidationProblem("The assembled asset would exceed the ticket's size limit.")
+
+        ticket.upload_mode = "chunked"
+        ticket.chunk_bytes = limit
+        ticket.chunk_count = total
+        staging_key = self._staging_key(ticket, index)
+        stored = await self.storage.put(
+            staging_key,
+            data,
+            content_type="application/octet-stream",
+            metadata={"ticket": str(ticket.id), "index": str(index)},
+        )
+        # Read the chunk straight back: a chunk that did not survive storage is not
+        # counted as received.
+        if hashlib.sha256(await self.storage.get(stored.key)).hexdigest() != actual:
+            await self.storage.delete(stored.key)
+            await self._fail(ticket, "chunk_readback_failed", "A chunk did not survive storage.")
+            raise ValidationProblem("The chunk could not be stored and verified.")
+
+        ticket.chunk_manifest = [
+            *(ticket.chunk_manifest or []),
+            {"index": index, "sha256": actual, "size": len(data), "key": stored.key},
+        ]
+        ticket.chunks_received = received + 1
+        ticket.received_bytes = projected
+        await self.session.flush()
+        await record_audit(
+            self.session,
+            action="flow.export_chunk_received",
+            entity_type="flow_asset_export",
+            entity_id=ticket.id,
+            actor_id=actor_id,
+            after={
+                "index": index,
+                "total": total,
+                "size_bytes": len(data),
+                "chunks_received": ticket.chunks_received,
+            },
+        )
+
+        if ticket.chunks_received < total:
+            return ticket, None
+
+        assembled = await self._assemble(ticket, total)
+        return await self._finalise(
+            ticket,
+            assembled,
+            now=now,
+            declared_content_type=ticket.declared_content_type,
+            actor_id=actor_id,
+            transfer="chunked",
+        )
+
+    # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _staging_key(ticket: FlowAssetExport, index: int) -> str:
+        return f"flow/staging/{ticket.id}/{index:06d}.part"
+
+    async def _fail(self, ticket: FlowAssetExport, code: str, message: str) -> None:
+        ticket.status = "failed"
+        ticket.error_code = code
+        ticket.error_message = message
+        await self.session.flush()
+
+    async def _assemble(self, ticket: FlowAssetExport, total: int) -> bytes:
+        """Rebuild the media from staging, verifying every chunk as it is read."""
+        manifest = list(ticket.chunk_manifest or [])
+        if len(manifest) != total:
+            await self._fail(ticket, "export_incomplete", "Chunks are missing from the upload.")
+            raise ValidationProblem("The upload is incomplete.")
+        indexes = [int(entry["index"]) for entry in manifest]
+        if indexes != list(range(total)):
+            await self._fail(ticket, "export_chunk_order", "Chunks were not contiguous.")
+            raise ValidationProblem("The chunk sequence is not contiguous.")
+
+        buffer = bytearray()
+        for entry in manifest:
+            key = str(entry.get("key") or self._staging_key(ticket, int(entry["index"])))
+            try:
+                data = await self.storage.get(key)
+            except Exception as exc:  # noqa: BLE001 - missing staging object
+                await self._fail(ticket, "export_incomplete", "A chunk is missing from storage.")
+                raise ValidationProblem("A chunk is missing from storage.") from exc
+            if hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+                await self._fail(ticket, "chunk_corrupted", "A staged chunk changed on disk.")
+                raise ValidationProblem("A staged chunk failed verification.")
+            if len(data) != int(entry.get("size") or 0):
+                await self._fail(ticket, "chunk_corrupted", "A staged chunk changed size.")
+                raise ValidationProblem("A staged chunk failed verification.")
+            buffer.extend(data)
+        return bytes(buffer)
+
+    async def _cleanup_staging(self, ticket: FlowAssetExport) -> None:
+        for entry in ticket.chunk_manifest or []:
+            key = entry.get("key") if isinstance(entry, dict) else None
+            if key:
+                try:
+                    await self.storage.delete(str(key))
+                except Exception:  # noqa: BLE001 - best effort cleanup
+                    pass
+
+    async def _finalise(
+        self,
+        ticket: FlowAssetExport,
+        data: bytes,
+        *,
+        now: Any,
+        declared_content_type: str,
+        actor_id: uuid.UUID | None,
+        transfer: str,
+    ) -> tuple[FlowAssetExport, CreativeAsset]:
+        """Verify, store, read back, and only then create the immutable asset."""
         info = inspect_media(data)
         if not info.recognized or not info.mime_type:
             ticket.status = "failed"
@@ -485,6 +672,8 @@ class FlowAssetExportService:
                 "generation_job_id": str(ticket.generation_job_id) if ticket.generation_job_id else None,
                 "verified_sha256": checksum,
                 "declared_content_type": declared_content_type or ticket.declared_content_type,
+                "transfer": transfer,
+                "chunks": int(ticket.chunks_received or 0),
             },
             actor_id=actor_id,
         )
@@ -512,8 +701,16 @@ class FlowAssetExportService:
                 "size_bytes": len(data),
                 "mime_type": info.mime_type,
                 "verified": True,
+                "transfer": transfer,
             },
         )
+        if transfer == "chunked":
+            await self._cleanup_staging(ticket)
+            ticket.chunk_manifest = [
+                {"index": entry["index"], "sha256": entry["sha256"], "size": entry["size"]}
+                for entry in (ticket.chunk_manifest or [])
+            ]
+            await self.session.flush()
         return ticket, asset
 
     async def get_ticket(self, ticket_id: uuid.UUID) -> FlowAssetExport:
@@ -577,8 +774,40 @@ def flow_status_payload(
             "checksum_verified": True,
             "readback_verified": True,
             "assets_created_before_verification": False,
+            "chunked": {
+                "enabled": True,
+                "chunk_bytes": int(settings.flow_export_chunk_bytes),
+                "max_chunks": int(settings.flow_export_max_chunks),
+                "chunk_checksum": "sha256",
+                "ordering": "strict",
+            },
         },
         "companion": gateway_status or {"configured": False, "sessions": []},
+        "source_gate": source_gate_payload(getattr(settings, "flow_source_package_path", "")),
+        "protocol": {
+            "supported": list(proto.SUPPORTED_PROTOCOLS),
+            "current": proto.PROTOCOL_VERSION,
+            "requires_provenance": True,
+            "required_hello_fields": list(proto.REQUIRED_PROVENANCE_FIELDS),
+            "allow_component_drift": bool(
+                getattr(settings, "flow_allow_component_drift", False)
+            ),
+            "close_codes": {
+                "provenance": proto.WS_CLOSE_PROVENANCE,
+                "unsupported_protocol": proto.WS_CLOSE_PROTOCOL,
+            },
+        },
+        "lifecycle": {
+            "states": [state.value for state in proto.FlowLifecycle],
+            "terminal": [
+                proto.FlowLifecycle.SUCCEEDED.value,
+                proto.FlowLifecycle.FAILED.value,
+                proto.FlowLifecycle.UNKNOWN_SUBMISSION.value,
+                proto.FlowLifecycle.CANCELLED.value,
+            ],
+            "auto_resubmit_after_unknown": False,
+            "duplicate_idempotency_key": "replay-if-identical-else-409",
+        },
         "upstream_blockers": list(proto.UPSTREAM_BLOCKERS),
         "note": (
             "Phase 3C.1 hardens the bridge, the command surface, the token boundary and "

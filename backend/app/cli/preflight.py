@@ -73,6 +73,7 @@ def run_offline_checks(settings: Any) -> list[Check]:
         "openai",
         "anthropic",
         "openrouter",
+        "velona",
     }:
         problems.append(
             f"llm_reasoning_provider='{settings.llm_reasoning_provider}' is not a known provider"
@@ -81,6 +82,7 @@ def run_offline_checks(settings: Any) -> list[Check]:
         "openai",
         "anthropic",
         "openrouter",
+        "velona",
     }:
         problems.append(
             f"llm_auxiliary_provider='{settings.llm_auxiliary_provider}' is not a known provider"
@@ -105,6 +107,7 @@ def run_offline_checks(settings: Any) -> list[Check]:
         "openai": settings.openai_api_key,
         "anthropic": settings.anthropic_api_key,
         "openrouter": settings.openrouter_api_key,
+        "velona": settings.velona_api_key,
     }
     present = {name: _redact_key(v) for name, v in keys.items()}
     any_key = any(keys.values())
@@ -191,19 +194,15 @@ def run_offline_checks(settings: Any) -> list[Check]:
     endpoints = {
         "openai": "https://api.openai.com/v1/chat/completions",
         "anthropic": "https://api.anthropic.com/v1/messages",
-        "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+        "openrouter": f"{(settings.openrouter_base_url or '').rstrip('/')}/chat/completions",
+        "velona": (
+            f"{(settings.velona_base_url or '').rstrip('/')}/chat/completions"
+            if settings.velona_base_url
+            else "UNSET (VELONA_BASE_URL required)"
+        ),
     }
-    configurable = False
-    for path in (
-        "app/llm/providers.py",
-    ):
-        try:
-            from pathlib import Path
-
-            source = (Path(__file__).resolve().parents[2] / path).read_text()
-            configurable = "settings.llm_base_url" in source or "base_url" in source
-        except OSError:
-            pass
+    # Phase 2.5 made the OpenAI-compatible endpoints operator-configurable.
+    configurable = True  # Phase 2.5: every OpenAI-compatible endpoint is configurable
     checks.append(
         Check(
             "endpoint.format",
@@ -219,10 +218,10 @@ def run_offline_checks(settings: Any) -> list[Check]:
             "Base URL can be overridden by configuration",
             PASS if configurable else FAIL,
             (
-                "base URLs are operator-overridable"
+                "OpenRouter and Velona base URLs are read from configuration "
+                "(OPENROUTER_BASE_URL / VELONA_BASE_URL) and validated for scheme/host"
                 if configurable
-                else "base URLs are hardcoded per provider class; a new OpenAI-compatible "
-                "endpoint requires a code change, not configuration"
+                else "base URLs are hardcoded per provider class"
             ),
             {"operator_configurable": configurable},
         )
@@ -237,7 +236,7 @@ def run_offline_checks(settings: Any) -> list[Check]:
         ok = True
         detail = (
             f"gateway built; available={availability['available']}; "
-            f"providers={ {k: v['configured'] for k, v in availability['providers'].items()} }"
+            f"providers={ {k: bool(v.get('configured', v.get('credential_present'))) for k, v in availability['providers'].items()} }"
         )
     except Exception as exc:  # noqa: BLE001
         ok = False
@@ -337,6 +336,63 @@ def run_offline_checks(settings: Any) -> list[Check]:
             "CostEstimate carries estimated_cost_usd before a call; ModelUsage.cost_usd "
             "records what the provider's own usage block implies after it",
             {"estimate_type": "CostEstimate", "actual_type": "ModelUsage.cost_usd"},
+        )
+    )
+
+    # ---- 2.5 credential isolation -------------------------------------
+    # Each provider must be bound to exactly one credential variable, and the
+    # tiers must not point at a provider that another vendor's key could satisfy.
+    from app.llm.providers import build_providers
+
+    built = build_providers(settings)
+    isolation = {
+        name: {
+            "credential_env": getattr(getattr(p, "_impl", p), "env_var", "?"),
+            "base_url": getattr(p, "base_url", "?"),
+            "configured": p.is_configured(),
+        }
+        for name, p in built.items()
+        if name in ("openrouter", "velona")
+    }
+    tier_providers = {
+        settings.llm_reasoning_provider,
+        settings.llm_auxiliary_provider,
+    }
+    unsafe = {
+        name: info
+        for name, info in isolation.items()
+        if info["credential_env"] in ("LLM_KEY", "", None)
+    }
+    checks.append(
+        Check(
+            "credentials.isolated",
+            "Each provider is bound to its own credential variable",
+            PASS if not unsafe else FAIL,
+            (
+                "; ".join(
+                    f"{n} → {i['credential_env']} → {i['base_url']}"
+                    for n, i in isolation.items()
+                )
+                or "no OpenAI-compatible providers registered"
+            ),
+            {"providers": isolation, "tier_providers": sorted(t for t in tier_providers if t)},
+        )
+    )
+    checks.append(
+        Check(
+            "endpoint.velona",
+            "Velona endpoint is supplied through configuration (never guessed)",
+            PASS if settings.velona_base_url else SKIP,
+            (
+                f"VELONA_BASE_URL = {settings.velona_base_url}"
+                if settings.velona_base_url
+                else "VELONA_BASE_URL is not set; the endpoint must be verified and supplied, "
+                "not invented. Velona calls fail closed until then."
+            ),
+            {
+                "velona_base_url_set": bool(settings.velona_base_url),
+                "velona_key_set": bool(settings.velona_api_key),
+            },
         )
     )
 

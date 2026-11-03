@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-03T06:08:45Z",
+  "generated_at": "2026-11-03T07:58:32Z",
   "base_url": "http://127.0.0.1:8000",
   "passed": 23,
   "total": 23,
@@ -7,7 +7,7 @@
     {
       "criterion": "1. Backend starts",
       "passed": true,
-      "detail": "liveness 200 (uptime 2.2s); /system/status reachable pre-auth -> 200"
+      "detail": "liveness 200 (uptime 5.4s); /system/status reachable pre-auth -> 200"
     },
     {
       "criterion": "1b. /system/status reports every integration honestly",
@@ -32,22 +32,22 @@
     {
       "criterion": "5. Director initialises a stateful workflow",
       "passed": true,
-      "detail": "15 nodes, interrupt at human_approval; workflow wf_686770acf1034619 produced 3 drafts in 8 iterations and is awaiting approval"
+      "detail": "15 nodes, interrupt at human_approval; workflow wf_a4a71d3bf9e9444a produced 3 drafts in 8 iterations and is awaiting approval"
     },
     {
       "criterion": "6. All six agents invocable through structured interfaces",
       "passed": true,
-      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run b44baf7a\u2026, 3 trace events)"
+      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run 546d77c9\u2026, 3 trace events)"
     },
     {
       "criterion": "7. Workflow state persists across restarts",
       "passed": true,
-      "detail": "a fresh process reconstructed thread wf_686770acf1034619: 23 checkpoints, identical plan and content ids"
+      "detail": "a fresh process reconstructed thread wf_a4a71d3bf9e9444a: 23 checkpoints, identical plan and content ids"
     },
     {
       "criterion": "8. Content create + immutable version history",
       "passed": true,
-      "detail": "content 9f15b707\u2026 now at v2 with distinct content hashes"
+      "detail": "content 1c6b2564\u2026 now at v2 with distinct content hashes"
     },
     {
       "criterion": "9. Approval state machine + invalidation on edit",
@@ -62,12 +62,12 @@
     {
       "criterion": "11. Model usage and cost are recordable",
       "passed": true,
-      "detail": "usage ledger 6400 -> 8000 tokens, $0.0168 -> $0.0210 across 1 provider row(s)"
+      "detail": "usage ledger 8000 -> 9600 tokens, $0.0210 -> $0.0252 across 1 provider row(s)"
     },
     {
       "criterion": "12. Automated test suite passes",
       "passed": true,
-      "detail": "353 tests, 0 failures, 0 errors"
+      "detail": "423 tests, 0 failures, 0 errors"
     },
     {
       "criterion": "13. Architecture documentation is complete",
@@ -92,7 +92,7 @@
     {
       "criterion": "17. Strategy generation works",
       "passed": true,
-      "detail": "strategy v1 DRAFT; 4 KPIs, 2 experiments, content_hash 52dafc28a5b3"
+      "detail": "strategy v1 DRAFT; 4 KPIs, 2 experiments, content_hash 73ec4f9b6c81"
     },
     {
       "criterion": "18. Versioning + approval invalidation",
@@ -102,7 +102,7 @@
     {
       "criterion": "19. Director orchestrates agents and gates on approval",
       "passed": true,
-      "detail": "workflow strat_4e0580caa5f3494f: 7 trace entries (reused 162 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
+      "detail": "workflow strat_09a1f932c4c844d9: 7 trace entries (reused 198 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
     },
     {
       "criterion": "20. Usage, cost and budget enforcement",

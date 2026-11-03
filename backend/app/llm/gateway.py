@@ -190,18 +190,25 @@ class LLMGateway:
         session: AsyncSession | None = None,
         settings: Settings | None = None,
         providers: dict[str, LLMProvider] | None = None,
+        transport: Any = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.session = session
         self.router = ModelRouter(self.settings)
-        self.providers = providers or build_providers(self.settings)
+        # An injected transport (httpx.MockTransport in tests) is threaded into
+        # every provider so automated tests can never open a socket.
+        self.providers = providers or build_providers(self.settings, transport=transport)
         self.usage = UsageService(session) if session is not None else None
 
     # ------------------------------------------------------------------ status
     def availability(self) -> dict[str, Any]:
         return {
             "providers": {
-                name: {"configured": p.is_configured()}
+                name: (
+                    p.describe()
+                    if hasattr(p, "describe")
+                    else {"configured": p.is_configured()}
+                )
                 for name, p in self.providers.items()
             },
             "routing": self.router.describe(),
@@ -242,8 +249,19 @@ class LLMGateway:
 
         route = self.router.resolve(agent_name, task_class)
         provider = self.providers.get(route.provider)
-        if provider is None or not provider.is_configured():
-            raise ProviderUnavailable(route.provider, "provider not configured")
+        if provider is None:
+            # No silent substitution: an unknown provider is a hard failure, not a
+            # cue to try a different vendor with a different credential.
+            raise ProviderUnavailable(
+                route.provider, "provider is not registered; refusing to substitute another"
+            )
+        if not provider.is_configured():
+            # Name precisely which configuration is missing, without values.
+            missing = getattr(provider, "env_var", None) or "credentials"
+            detail = f"{missing} is not set"
+            if getattr(provider, "name", "") == "velona" and not provider.is_configured():
+                detail = "VELONA_API_KEY and/or VELONA_BASE_URL is not set"
+            raise ProviderUnavailable(route.provider, detail)
 
         if model_budget_tokens is not None and request.max_tokens > model_budget_tokens:
             raise BudgetExceeded(

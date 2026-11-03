@@ -64,11 +64,15 @@ def test_preflight_reports_missing_credentials_as_failure(settings):
     assert all(state == "absent" for state in evidence.values())
 
 
-def test_preflight_flags_hardcoded_base_url_as_a_failure(settings):
-    """The defect that blocks Velona routing must stay visible, not be papered over."""
+def test_preflight_confirms_configurable_base_url_after_phase_2_5(settings):
+    """Phase 2.5 fixed the hardcoded-base-URL defect; the check must now pass.
+
+    This test previously asserted FAIL. It was updated only because the defect it
+    pinned was actually repaired — not to make a failure go away.
+    """
     results = {c.id: c for c in preflight.run_offline_checks(settings)}
-    assert results["endpoint.configurable"].status == preflight.FAIL
-    assert "hardcoded" in results["endpoint.configurable"].detail
+    assert results["endpoint.configurable"].status == preflight.PASS
+    assert "VELONA_BASE_URL" in results["endpoint.configurable"].detail
 
 
 def test_preflight_flags_unverified_pricing(settings):

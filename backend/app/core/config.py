@@ -81,15 +81,38 @@ class Settings(BaseSettings):
     llm_monthly_budget_usd: float = 100.0
     llm_request_timeout_seconds: int = 60
 
+    # ---- Phase 2.5: provider-independent routing -------------------------
+    # Each provider owns exactly one credential variable and one endpoint.
+    # There is deliberately no shared/generic "LLM_KEY": a single undifferentiated
+    # key is what made a cross-provider credential mixup possible.
+    #
+    # OpenRouter: fixed, well-known endpoint; key is OPENROUTER_API_KEY.
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_timeout_seconds: int = 60
+    openrouter_max_retries: int = 2
+    # Velona: an OpenAI-compatible vendor whose endpoint we must NOT invent.
+    # Both are required before the provider is usable; with either missing the
+    # provider reports unconfigured and every call fails closed.
+    velona_api_key: str | None = None
+    velona_base_url: str | None = None
+    velona_timeout_seconds: int = 60
+    velona_max_retries: int = 2
+    # Reject plain HTTP for remote endpoints. Loopback stays allowed so a local
+    # bridge can be used in development; set false to forbid even that.
+    llm_allow_http_localhost: bool = True
+
     # ---- Phase 2: model tiering, routing and budgets --------------------
     # Model ids are configuration data. The defaults below are the ones the
     # Phase 2 brief specifies; they are not hardcoded in any agent, and an
     # unknown id is priced conservatively and flagged as unverified rather than
     # silently trusted.
     # Set any of these to empty to disable that tier explicitly.
-    llm_reasoning_provider: str | None = "openrouter"
+    # Phase 2.5: both tiers now name *velona*, so a credential is never sent to
+    # a host it does not belong to. Change these only to a provider whose key is
+    # configured; an unconfigured provider fails closed rather than borrowing one.
+    llm_reasoning_provider: str | None = "velona"
     llm_reasoning_model: str | None = "deepseek-v4.1-flash"
-    llm_auxiliary_provider: str | None = "openrouter"
+    llm_auxiliary_provider: str | None = "velona"
     llm_auxiliary_model: str | None = "qwen-3.7-flash"
     # Explicit per-task overrides:
     #   {"classification": {"provider": "openrouter", "model": "qwen-3.7-flash"}}

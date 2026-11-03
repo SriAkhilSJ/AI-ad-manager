@@ -36,6 +36,8 @@ class UsageService:
         success: bool = True,
         operation: str = "structured_call",
         metadata: dict[str, Any] | None = None,
+        tier: str = "default",
+        task_class: str = "",
     ) -> ModelUsage:
         row = ModelUsage(
             agent_run_id=agent_run_id,
@@ -50,6 +52,8 @@ class UsageService:
             latency_ms=latency_ms,
             success=success,
             operation=operation,
+            tier=tier,
+            task_class=task_class,
             metadata_json=metadata or {},
         )
         self.session.add(row)

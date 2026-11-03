@@ -81,6 +81,47 @@ class Settings(BaseSettings):
     llm_monthly_budget_usd: float = 100.0
     llm_request_timeout_seconds: int = 60
 
+    # ---- Phase 2: model tiering, routing and budgets --------------------
+    # Model ids are configuration data. The defaults below are the ones the
+    # Phase 2 brief specifies; they are not hardcoded in any agent, and an
+    # unknown id is priced conservatively and flagged as unverified rather than
+    # silently trusted.
+    # Set any of these to empty to disable that tier explicitly.
+    llm_reasoning_provider: str | None = "openrouter"
+    llm_reasoning_model: str | None = "deepseek-v4.1-flash"
+    llm_auxiliary_provider: str | None = "openrouter"
+    llm_auxiliary_model: str | None = "qwen-3.7-flash"
+    # Explicit per-task overrides:
+    #   {"classification": {"provider": "openrouter", "model": "qwen-3.7-flash"}}
+    llm_task_routing_json: dict[str, Any] = Field(default_factory=dict)
+    # Operator-supplied pricing (USD / 1k tokens), keyed by "provider/model" or
+    # bare model id. Entries here are treated as verified prices.
+    llm_pricing_json: dict[str, Any] = Field(default_factory=dict)
+
+    # Budget envelopes. The brief's default is "initially equivalent to ₹5 for a
+    # simple task"; USD is the accounting currency, so the default is a
+    # configurable conversion of that intention, not a hardcoded guess.
+    strategy_budget_usd: float = 0.06      # ≈ ₹5 at the configured FX rate
+    research_budget_usd: float = 0.12      # research needs more calls than one task
+    usd_inr_rate: float = 83.0
+    budget_currency: str = "USD"
+
+    # Bounded execution for research/strategy runs
+    research_max_iterations: int = 6
+    research_max_tool_calls: int = 24
+    research_max_wall_seconds: int = 240
+    strategy_max_iterations: int = 4
+    strategy_max_tool_calls: int = 12
+    strategy_max_wall_seconds: int = 180
+    agent_max_tool_calls_per_run: int = 12
+
+    # ---- Phase 2: research providers -----------------------------------
+    research_provider: Literal["auto", "deterministic", "http", "disabled"] = "auto"
+    research_http_endpoint: str | None = None
+    research_http_api_key: str | None = None
+    research_max_sources: int = 25
+    research_cache_ttl_seconds: int = 3600
+
     # ---- agent limits ----
     agent_max_attempts: int = 2
     agent_max_tokens_per_run: int = 4000
@@ -101,6 +142,17 @@ class Settings(BaseSettings):
     token_vault_backend: Literal["none", "s3", "external"] = "none"
 
     # ------------------------------------------------------------------ #
+    @field_validator("llm_task_routing_json", "llm_pricing_json", mode="before")
+    @classmethod
+    def _parse_dict_json(cls, value: Any) -> Any:
+        if value in (None, "", b""):
+            return {}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, (str, bytes)):
+            return json.loads(value)
+        return value
+
     @field_validator("llm_routing_json", mode="before")
     @classmethod
     def _parse_routing(cls, value: Any) -> Any:

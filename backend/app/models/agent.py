@@ -103,6 +103,10 @@ class ModelUsage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     success: Mapped[bool] = mapped_column(default=True, nullable=False)
     operation: Mapped[str] = mapped_column(String(64), nullable=False, default="structured_call")
+    # Phase 2: which routing tier served this call. Auxiliary usage is tracked
+    # separately so cheap-model spend is never conflated with reasoning spend.
+    tier: Mapped[str] = mapped_column(String(32), nullable=False, default="default", index=True)
+    task_class: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     recorded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

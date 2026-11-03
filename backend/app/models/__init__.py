@@ -14,6 +14,26 @@ from app.models.content import ContentItem, ContentStatus, ContentVersion
 from app.models.creative import CreativeAsset, CreativeAssetStatus, CreativeKind
 from app.models.idempotency import IdempotencyKey
 from app.models.memory import MarketingMemory, MemoryKind
+from app.models.research import (
+    RESEARCH_CATEGORIES,
+    BUSINESS_OBJECTIVES,
+    AudiencePainPoint,
+    AudienceSegment,
+    MarketingObjective,
+    ProductFact,
+    ResearchFinding,
+    ResearchProject,
+    ResearchSource,
+    ResearchStatus,
+    VerificationStatus,
+)
+from app.models.strategy import (
+    GrowthExperiment,
+    MarketingStrategy,
+    StrategyApproval,
+    StrategyStatus,
+    StrategyVersion,
+)
 from app.models.social import (
     Platform,
     PublishedPost,
@@ -56,4 +76,21 @@ __all__ = [
     "DEFAULT_ORGANIZATION_ID",
     "WorkflowCheckpoint",
     "WorkflowWrite",
+    # Phase 2
+    "RESEARCH_CATEGORIES",
+    "BUSINESS_OBJECTIVES",
+    "AudiencePainPoint",
+    "AudienceSegment",
+    "MarketingObjective",
+    "ProductFact",
+    "ResearchFinding",
+    "ResearchProject",
+    "ResearchSource",
+    "ResearchStatus",
+    "VerificationStatus",
+    "GrowthExperiment",
+    "MarketingStrategy",
+    "StrategyApproval",
+    "StrategyStatus",
+    "StrategyVersion",
 ]

@@ -21,46 +21,166 @@ from app.models.agent import ModelUsage
 from app.services.usage import UsageService
 
 
-@dataclass(frozen=True)
-class Route:
-    provider: str
-    model: str | None = None
+from app.llm.routing import (
+    Route,
+    configured_models,
+    estimate_cost,
+    estimate_prompt_tokens,
+    price_for_model,
+    tier_for_task,
+    unverified_models,
+)
+
+__all__ = [
+    "LLMGateway",
+    "ModelRouter",
+    "Route",
+    "gateway_status",
+    "reset_gateway_status",
+]
 
 
 class ModelRouter:
-    """Resolves (agent/purpose) → (provider, model) from environment config.
+    """Resolves (agent, task_class) → (provider, model) from configuration.
 
-    ``LLM_ROUTING_JSON`` example::
+    Resolution precedence, most specific first:
 
-        {"strategy": {"provider": "anthropic", "model": "claude-sonnet-4"},
-         "content":  {"provider": "openai",    "model": "gpt-4o-mini"},
-         "default":  {"provider": "openai",    "model": "gpt-4o-mini"}}
+    1. ``LLM_TASK_ROUTING_JSON[task_class]`` — explicit per-work-class override.
+    2. ``LLM_ROUTING_JSON[agent_name]``      — Phase 1 behaviour, unchanged.
+    3. tier default                          — auxiliary or reasoning model.
+    4. ``LLM_DEFAULT_PROVIDER/MODEL``        — global fallback.
+    5. ``default`` entry in ``LLM_ROUTING_JSON``.
+
+    Nothing is guessed: if no provider can be resolved a typed
+    :class:`ProviderUnavailable` is raised and the caller degrades honestly.
     """
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._routing: dict[str, Any] = settings.llm_routing_json or {}
+        self._task_routing: dict[str, Any] = getattr(settings, "llm_task_routing_json", None) or {}
 
-    def resolve(self, agent_name: str) -> Route:
-        entry = self._routing.get(agent_name) or self._routing.get("default") or {}
-        provider = entry.get("provider") or self.settings.llm_default_provider
-        model = entry.get("model") or self.settings.llm_default_model
-        if not provider:
-            # Nothing configured: raise a typed error, never guess a vendor.
-            raise ProviderUnavailable(
-                "none",
-                "no LLM provider configured (set LLM_DEFAULT_PROVIDER or LLM_ROUTING_JSON)",
+    # ------------------------------------------------------------------ tiers
+    def tier_models(self) -> dict[str, tuple[str, str | None]]:
+        return {
+            "reasoning": (
+                self.settings.llm_reasoning_provider,
+                self.settings.llm_reasoning_model,
+            ),
+            "auxiliary": (
+                self.settings.llm_auxiliary_provider,
+                self.settings.llm_auxiliary_model,
+            ),
+        }
+
+    def resolve(self, agent_name: str, task_class: str = "") -> Route:
+        tier = tier_for_task(task_class)
+
+        # 1. explicit task-class override
+        if task_class:
+            entry = self._task_routing.get(task_class) or {}
+            if entry.get("provider"):
+                return Route(
+                    provider=entry["provider"],
+                    model=entry.get("model"),
+                    tier=tier,
+                    task_class=task_class,
+                    source="task_routing",
+                )
+
+        # 2. Phase 1 agent routing (unchanged semantics)
+        entry = self._routing.get(agent_name) or {}
+        if entry.get("provider"):
+            return Route(
+                provider=entry["provider"],
+                model=entry.get("model"),
+                tier=tier,
+                task_class=task_class,
+                source="agent_routing",
             )
-        return Route(provider=provider, model=model)
+
+        # 3. tier default
+        if tier in ("reasoning", "auxiliary"):
+            provider, model = self.tier_models()[tier]
+            if provider:
+                return Route(
+                    provider=provider,
+                    model=model,
+                    tier=tier,
+                    task_class=task_class,
+                    source=f"{tier}_default",
+                )
+
+        # 4. global default
+        if self.settings.llm_default_provider:
+            return Route(
+                provider=self.settings.llm_default_provider,
+                model=self.settings.llm_default_model,
+                tier=tier,
+                task_class=task_class,
+                source="global_default",
+            )
+
+        # 5. routing table default entry
+        entry = self._routing.get("default") or {}
+        if entry.get("provider"):
+            return Route(
+                provider=entry["provider"],
+                model=entry.get("model"),
+                tier=tier,
+                task_class=task_class,
+                source="routing_default",
+            )
+
+        # Nothing configured: raise a typed error, never guess a vendor.
+        raise ProviderUnavailable(
+            "none",
+            "no LLM provider configured (set LLM_REASONING_PROVIDER, "
+            "LLM_DEFAULT_PROVIDER or LLM_ROUTING_JSON)",
+        )
+
+    # ------------------------------------------------------------ estimation
+    def estimate(
+        self,
+        *,
+        agent_name: str,
+        task_class: str,
+        system_prompt: str,
+        user_prompt: str,
+        max_output_tokens: int,
+    ) -> dict[str, Any]:
+        """Pre-flight cost estimate; the UI shows this before a run starts."""
+        route = self.resolve(agent_name, task_class)
+        estimate = estimate_cost(
+            provider=route.provider,
+            model=route.model,
+            prompt_tokens=estimate_prompt_tokens(system_prompt, user_prompt),
+            completion_tokens=max_output_tokens,
+            tier=route.tier,
+            task_class=task_class,
+            settings=self.settings,
+        )
+        payload = estimate.as_dict()
+        payload["route"] = route.as_dict()
+        return payload
 
     def describe(self) -> dict[str, Any]:
+        models = configured_models(self.settings)
         return {
             "default": {
                 "provider": self.settings.llm_default_provider or None,
                 "model": self.settings.llm_default_model or None,
             },
+            "tiers": models,
+            "task_routing": self._task_routing,
             "routing": self._routing,
-            "configured": bool(self.settings.llm_default_provider or self._routing),
+            "unverified_models": list(unverified_models(self.settings)),
+            "configured": bool(
+                self.settings.llm_default_provider
+                or self.settings.llm_reasoning_provider
+                or self._routing
+                or self._task_routing
+            ),
         }
 
 
@@ -86,6 +206,8 @@ class LLMGateway:
             },
             "routing": self.router.describe(),
             "monthly_budget_usd": self.settings.llm_monthly_budget_usd,
+            "strategy_budget_usd": self.settings.strategy_budget_usd,
+            "research_budget_usd": self.settings.research_budget_usd,
             "available": any(p.is_configured() for p in self.providers.values()),
         }
 
@@ -98,8 +220,27 @@ class LLMGateway:
         agent_run_id: Any = None,
         attempt: int = 1,
         model_budget_tokens: int | None = None,
+        task_class: str = "",
+        budget: Any = None,
+        dedupe: Any = None,
+        dedupe_key: str = "",
+        cancel: Any = None,
     ) -> LLMResponse:
-        route = self.router.resolve(agent_name)
+        """Run one structured call under every configured budget.
+
+        Order matters and is deliberate:
+
+        1. cancellation is honoured *before* anything is spent;
+        2. the route is resolved (a missing provider fails before a budget check,
+           so the error explains the real cause);
+        3. the response cache is consulted (a duplicate prompt costs nothing);
+        4. the estimate is checked against the run budget *and* the monthly cap;
+        5. only then is the provider called.
+        """
+        if cancel is not None:
+            cancel.check()
+
+        route = self.router.resolve(agent_name, task_class)
         provider = self.providers.get(route.provider)
         if provider is None or not provider.is_configured():
             raise ProviderUnavailable(route.provider, "provider not configured")
@@ -110,12 +251,37 @@ class LLMGateway:
                 f"{model_budget_tokens}"
             )
 
+        cache_key = ""
+        if dedupe is not None:
+            cache_key = dedupe.key_for(
+                dedupe_key or request.schema_name, request.user_prompt
+            )
+            cached = dedupe.get(cache_key)
+            if cached is not None:
+                return cached
+
+        estimate = estimate_cost(
+            provider=route.provider,
+            model=route.model,
+            prompt_tokens=estimate_prompt_tokens(
+                request.system_prompt, request.user_prompt
+            ),
+            completion_tokens=request.max_tokens,
+            tier=route.tier,
+            task_class=task_class,
+            settings=self.settings,
+        )
+
+        if budget is not None:
+            budget.check(estimate)
+
         if self.usage is not None:
             spent = await self.usage.month_spend()
-            if spent >= self.settings.llm_monthly_budget_usd:
+            if spent + estimate.estimated_cost_usd > self.settings.llm_monthly_budget_usd:
                 raise BudgetExceeded(
                     f"monthly LLM budget of ${self.settings.llm_monthly_budget_usd:.2f} "
-                    f"exhausted (spent ${spent:.2f})"
+                    f"would be exceeded (spent ${spent:.2f}, "
+                    f"call estimated ${estimate.estimated_cost_usd:.4f})"
                 )
 
         if route.model:
@@ -123,13 +289,21 @@ class LLMGateway:
 
         response = await provider.structured(request)
 
-        if self.usage is not None and agent_run_id is not None:
+        if budget is not None:
+            budget.record(cost_usd=response.cost_usd, tokens=response.total_tokens)
+
+        if dedupe is not None and cache_key:
+            dedupe.put(cache_key, response)
+
+        if self.usage is not None:
             await self._record_usage(
                 agent_run_id=agent_run_id,
                 agent_name=agent_name,
                 response=response,
                 attempt=attempt,
                 operation=request.purpose,
+                tier=route.tier,
+                task_class=task_class,
             )
         return response
 
@@ -141,16 +315,25 @@ class LLMGateway:
         response: LLMResponse,
         attempt: int,
         operation: str,
+        tier: str = "default",
+        task_class: str = "",
     ) -> None:
-        """Idempotent write: one row per (run, attempt)."""
+        """Idempotent write: one row per (run, attempt).
+
+        Runs without an ``agent_run_id`` (e.g. a research tool call made outside
+        an agent) are still recorded — ``agent_run_id`` is nullable precisely so
+        auxiliary research spend is not invisible to cost reporting.
+        """
         assert self.usage is not None
-        existing = await self.session.execute(  # type: ignore[union-attr]
-            select(ModelUsage).where(
-                ModelUsage.agent_run_id == agent_run_id, ModelUsage.attempt == attempt
+        if agent_run_id is not None:
+            existing = await self.session.execute(  # type: ignore[union-attr]
+                select(ModelUsage).where(
+                    ModelUsage.agent_run_id == agent_run_id,
+                    ModelUsage.attempt == attempt,
+                )
             )
-        )
-        if existing.scalar_one_or_none() is not None:
-            return
+            if existing.scalar_one_or_none() is not None:
+                return
         await self.usage.record(
             agent_run_id=agent_run_id,
             agent_name=agent_name,
@@ -162,6 +345,9 @@ class LLMGateway:
             cost_usd=response.cost_usd,
             latency_ms=response.latency_ms,
             operation=operation,
+            tier=tier,
+            task_class=task_class,
+            metadata={"tier": tier, "task_class": task_class},
         )
 
 

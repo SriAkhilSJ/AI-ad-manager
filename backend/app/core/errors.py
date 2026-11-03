@@ -122,6 +122,43 @@ class IdempotencyConflictError(AppError):
     message = "This Idempotency-Key was already used with a different request body."
 
 
+# ---- Phase 2 -------------------------------------------------------------
+class BudgetExhaustedError(AppError):
+    """A run was stopped because its cost or token budget was spent.
+
+    Distinct from a 402/429: nothing is wrong with the request, the *envelope*
+    ran out. The Director reports how much was spent and what remains undone.
+    """
+
+    code = "budget_exhausted"
+    status_code = status.HTTP_409_CONFLICT
+    message = "The cost or token budget for this run is exhausted."
+
+
+class CancelledProblem(AppError):
+    """Cooperative cancellation of a long-running research/strategy run."""
+
+    code = "cancelled"
+    status_code = status.HTTP_409_CONFLICT
+    message = "The run was cancelled."
+
+
+class LoopDetectedError(AppError):
+    """The orchestrator would repeat work it has already done."""
+
+    code = "loop_detected"
+    status_code = status.HTTP_409_CONFLICT
+    message = "Execution would repeat a task that has already been attempted."
+
+
+class ResearchUnavailableError(AppError):
+    """No usable research provider is configured for the requested scope."""
+
+    code = "research_unavailable"
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    message = "No research provider is configured."
+
+
 def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", "")
 

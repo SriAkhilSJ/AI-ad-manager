@@ -594,10 +594,9 @@ async def test_budget_guard_still_blocks_before_spending():
         settings=settings(velona_api_key=VELONA_KEY, velona_base_url=VELONA_URL),
         transport=recorder.transport(),
     )
-    # NB: max_cost_usd=0 means "uncapped" in BudgetGuard (Phase 2 semantics), not
-    # "block everything" — see test_zero_cost_budget_means_uncapped below. Use a
-    # budget too small for any call so the guard must refuse.
-    guard = BudgetGuard(max_cost_usd=1e-9, label="test")
+    # Phase 2.6: max_cost_usd=0 now blocks every paid request, so a zero budget is
+    # the direct way to express "this run may not spend".
+    guard = BudgetGuard(max_cost_usd=0, label="test")
     with pytest.raises(BudgetExceeded):
         await gateway.structured(
             agent_name="strategy",
@@ -608,17 +607,20 @@ async def test_budget_guard_still_blocks_before_spending():
     assert recorder.requests == [], "an exhausted budget must prevent the request entirely"
 
 
-def test_zero_cost_budget_means_uncapped_and_that_is_a_known_trap():
-    """Documents a fail-open semantic inherited from Phase 2.
+def test_zero_cost_budget_blocks_every_paid_request():
+    """Phase 2.6 inverted this test.
 
-    ``BudgetGuard(max_cost_usd=0)`` disables the cost check instead of forbidding
-    all spend. An operator who sets 0 expecting "spend nothing" gets "spend
-    anything". This test pins the current behaviour so the Phase 2.5 report can
-    flag it as a residual risk rather than have it discovered in production.
+    Through Phase 2.5, ``BudgetGuard(max_cost_usd=0)`` *disabled* the cost check,
+    so an operator who wrote 0 to mean "spend nothing" got "spend anything". That
+    fail-open trap is now closed: zero means block, and the guard says so in a
+    human-readable reason. The old assertion (``permissive.check(...)`` does not
+    raise) is deliberately replaced rather than deleted, so the semantic change
+    is visible in the test history.
     """
+    from app.llm.base import BudgetExceeded
     from app.llm.routing import BudgetGuard, CostEstimate
 
-    permissive = BudgetGuard(max_cost_usd=0.0)
+    guard = BudgetGuard(max_cost_usd=0.0, label="zero")
     estimate = CostEstimate(
         provider="velona",
         model="deepseek-v4.1-flash",
@@ -629,12 +631,19 @@ def test_zero_cost_budget_means_uncapped_and_that_is_a_known_trap():
         input_per_1k=0.004,
         output_per_1k=0.016,
         estimated_cost_usd=0.5,
-        price_verified=False,
+        price_verified=True,
     )
-    permissive.check(estimate)  # no raise: 0 == uncapped
+    with pytest.raises(BudgetExceeded) as exc:
+        guard.check(estimate)
+    assert "cost budget is zero" in str(exc.value)
+    assert guard.remaining_usd == 0.0
+    assert guard.snapshot()["max_cost_usd"] == 0.0
+    assert guard.snapshot()["unlimited"] is False
 
+    # The old "tiny budget instead of zero" workaround still works, and now there
+    # are two distinct mechanisms rather than one overloaded one.
     strict = BudgetGuard(max_cost_usd=1e-9)
-    with pytest.raises(Exception):
+    with pytest.raises(BudgetExceeded):
         strict.check(estimate)
 
 

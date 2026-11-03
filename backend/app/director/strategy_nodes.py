@@ -37,6 +37,7 @@ from app.director.strategy_state import (
     StrategyWorkflowState,
 )
 from app.llm.gateway import LLMGateway
+from app.llm.routing import BudgetGuard
 from app.models.brand import BrandProfile
 from app.models.research import RESEARCH_CATEGORIES, ProductFact, VerificationStatus
 from app.services.brand import BrandService
@@ -88,7 +89,34 @@ class StrategyNodes:
             return None
         return await self.session.get(BrandProfile, uuid.UUID(str(brand_id)))
 
+    def _remaining_budget(self, state: StrategyWorkflowState) -> float:
+        """Money this run may still spend, derived from persisted state.
+
+        Phase 2.6: the result is authoritative. If research consumed the whole
+        envelope this returns exactly ``0.0``, and a zero budget now blocks paid
+        work instead of granting unlimited spending.
+        """
+        budget = dict(state.get("budget") or {})
+        cost = dict(state.get("cost_actual") or {})
+        ceiling = float(budget.get("max_cost_usd", self.settings.strategy_budget_usd))
+        spent = float(
+            cost.get("total_usd", cost.get("research_usd", 0.0)) or 0.0
+        )
+        return round(max(0.0, ceiling - spent), 6)
+
     def _ctx(self, state: StrategyWorkflowState, brand: BrandProfile | None, node: str) -> AgentContext:
+        # One guard per node, owned by the Director and handed to the agent. The
+        # agent adopts it (``shared_budget``) instead of building a private one,
+        # so primary and auxiliary model calls in this node settle against the
+        # same reservation ledger.
+        guard = BudgetGuard(
+            max_cost_usd=self._remaining_budget(state),
+            max_tokens=getattr(self.settings, "agent_max_tokens_per_run", 20_000),
+            label=f"director:{node}",
+            allow_unknown_pricing=bool(
+                getattr(self.settings, "llm_allow_unverified_pricing", False)
+            ),
+        )
         return AgentContext(
             session=self.session,
             brand=brand,
@@ -96,6 +124,7 @@ class StrategyNodes:
             actor_id=uuid.UUID(state["actor_id"]) if state.get("actor_id") else None,
             workflow_thread_id=state.get("workflow_id"),
             workflow_node=node,
+            extra={"budget_guard": guard},
         )
 
     def _limits(
@@ -597,12 +626,9 @@ class StrategyNodes:
 
         ctx = self._ctx(state, brand, "strategy")
         agent = self.registry.get("strategy")
-        budget = dict(state.get("budget") or {})
-        remaining = max(
-            0.0,
-            float(budget.get("max_cost_usd", self.settings.strategy_budget_usd))
-            - float((state.get("cost_actual") or {}).get("research_usd", 0.0)),
-        )
+        # Same derivation as the guard in ``_ctx``: 0.0 here means "blocked",
+        # never "unlimited".
+        remaining = self._remaining_budget(state)
         payload = {
             "brand_profile_id": str(brand.id),
             "request": state.get("objective", ""),

@@ -290,12 +290,27 @@ class LLMGateway:
             settings=self.settings,
         )
 
+        # ---- budget: reserve atomically, before anything is spent ------
+        # Phase 2.6: claim the estimated cost up front so two concurrent calls
+        # cannot both see the same headroom. ``reserve`` replaces the old
+        # check-then-spend gap, which was racy by construction.
+        claim: str | None = None
         if budget is not None:
-            budget.check(estimate)
+            budget.trust_pricing(
+                verified=estimate.price_verified,
+                provider=estimate.provider,
+                model=estimate.model or "",
+            )
+            claim = budget.reserve(
+                estimate, token_id=f"{agent_name}:{request.schema_name}:{estimate.model}"
+            )
 
         if self.usage is not None:
             spent = await self.usage.month_spend()
             if spent + estimate.estimated_cost_usd > self.settings.llm_monthly_budget_usd:
+                if budget is not None and claim is not None:
+                    # Nothing was sent: release the claim in full.
+                    budget.reconcile(claim, actual_cost_usd=0.0)
                 raise BudgetExceeded(
                     f"monthly LLM budget of ${self.settings.llm_monthly_budget_usd:.2f} "
                     f"would be exceeded (spent ${spent:.2f}, "
@@ -305,10 +320,31 @@ class LLMGateway:
         if route.model:
             request.metadata["model"] = route.model
 
-        response = await provider.structured(request)
+        try:
+            response = await provider.structured(request)
+        except ProviderUnavailable as exc:
+            # A provider error before we know whether the request was billed.
+            # Timeouts are ambiguous: the vendor may have charged us. Keep the
+            # reservation committed for anything that could have been processed.
+            if budget is not None and claim is not None:
+                ambiguous = _is_ambiguous_failure(exc)
+                budget.reconcile(
+                    claim,
+                    actual_cost_usd=estimate.estimated_cost_usd if ambiguous else 0.0,
+                    ambiguous=ambiguous,
+                )
+            raise
+        except Exception:
+            if budget is not None and claim is not None:
+                budget.reconcile(claim, actual_cost_usd=0.0)
+            raise
 
-        if budget is not None:
-            budget.record(cost_usd=response.cost_usd, tokens=response.total_tokens)
+        if budget is not None and claim is not None:
+            budget.reconcile(
+                claim,
+                actual_cost_usd=response.cost_usd,
+                tokens=response.total_tokens,
+            )
 
         if dedupe is not None and cache_key:
             dedupe.put(cache_key, response)
@@ -367,6 +403,20 @@ class LLMGateway:
             task_class=task_class,
             metadata={"tier": tier, "task_class": task_class},
         )
+
+
+def _is_ambiguous_failure(exc: Exception) -> bool:
+    """True when we cannot know whether the provider processed the request.
+
+    A timeout or connection reset after the request was written could mean the
+    vendor generated (and will bill) a completion. Treating that as "free" would
+    under-count spend, so the reservation is retained instead of released.
+    """
+    reason = str(getattr(exc, "reason", "") or exc).lower()
+    return any(
+        token in reason
+        for token in ("timeout", "timed out", "readtimeout", "connecttimeout", "pooltimeout")
+    )
 
 
 _gateway_status_cache: dict[str, Any] | None = None

@@ -121,6 +121,12 @@ class Settings(BaseSettings):
     # bare model id. Entries here are treated as verified prices.
     llm_pricing_json: dict[str, Any] = Field(default_factory=dict)
 
+    # Phase 2.6 fail-closed pricing. When False (the default), a paid request is
+    # blocked if its model price is an unverified placeholder, because a budget
+    # reserved against an invented price is not a guarantee. Set True only to
+    # accept that the placeholder may under-estimate by one request.
+    llm_allow_unverified_pricing: bool = False
+
     # Budget envelopes. The brief's default is "initially equivalent to ₹5 for a
     # simple task"; USD is the accounting currency, so the default is a
     # configurable conversion of that intention, not a hardcoded guess.

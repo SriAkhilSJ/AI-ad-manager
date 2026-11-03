@@ -52,6 +52,10 @@ class ExecutionLimits:
     max_tokens: int = 20_000
     max_repeats: int = 3
     label: str = "run"
+    #: Phase 2.6 — whether an unverified (placeholder) model price may be spent
+    #: against. Defaults to False so a misconfigured price cannot silently
+    #: under-reserve; the agents copy this from settings.
+    allow_unknown_pricing: bool = False
 
     @classmethod
     def for_research(cls, settings: Any) -> "ExecutionLimits":
@@ -62,6 +66,9 @@ class ExecutionLimits:
             max_cost_usd=settings.research_budget_usd,
             max_tokens=getattr(settings, "agent_max_tokens_per_run", 20_000),
             label="research",
+            allow_unknown_pricing=bool(
+                getattr(settings, "llm_allow_unverified_pricing", False)
+            ),
         )
 
     @classmethod
@@ -73,6 +80,9 @@ class ExecutionLimits:
             max_cost_usd=settings.strategy_budget_usd,
             max_tokens=getattr(settings, "agent_max_tokens_per_run", 20_000),
             label="strategy",
+            allow_unknown_pricing=bool(
+                getattr(settings, "llm_allow_unverified_pricing", False)
+            ),
         )
 
 
@@ -81,6 +91,11 @@ class ExecutionGuard:
     """Tracks and enforces every bound for one run."""
 
     limits: ExecutionLimits
+    #: Optional externally-owned budget. When supplied (the Director passes one
+    #: per node so research/strategy share one scope) the guard adopts it instead
+    #: of creating a private one, so primary and auxiliary model calls draw from
+    #: the same reservation ledger.
+    shared_budget: BudgetGuard | None = None
     budget: BudgetGuard = field(init=False)
     cancel: CancellationToken = field(default_factory=CancellationToken)
     started_at: float = field(default_factory=time.monotonic)
@@ -91,11 +106,18 @@ class ExecutionGuard:
     events: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        if self.shared_budget is not None:
+            # Adopt, don't recreate: a second guard would give the same run two
+            # independent spend counters and defeat the reservation guarantee.
+            self.budget = self.shared_budget
+            self.budget.allow_unknown_pricing = self.limits.allow_unknown_pricing
+            return
         self.budget = BudgetGuard(
             max_cost_usd=self.limits.max_cost_usd,
             max_tokens=self.limits.max_tokens,
             max_tool_calls=self.limits.max_tool_calls,
             label=self.limits.label,
+            allow_unknown_pricing=self.limits.allow_unknown_pricing,
         )
 
     # ------------------------------------------------------------------ checks

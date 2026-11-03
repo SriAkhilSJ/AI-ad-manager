@@ -21,6 +21,10 @@ dist/
 backend/.data/
 *.sqlite3
 *.db
+*.db-wal
+*.db-shm
+# scratch databases written by the test session (normally self-cleaning)
+backend/tests/.tmp/
 /storage/
 .data/storage/
 

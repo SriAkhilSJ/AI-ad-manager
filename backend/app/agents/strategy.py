@@ -338,8 +338,13 @@ class StrategyAgent(BaseAgent[StrategyInput, StrategyOutput]):
 
         limits = ExecutionLimits.for_strategy(settings)
         if payload.max_cost_usd is not None:
+            # Phase 2.6: a provided envelope is authoritative, including 0.0,
+            # which now blocks all paid work instead of meaning "unlimited".
             limits.max_cost_usd = max(0.0, float(payload.max_cost_usd))
-        guard = ExecutionGuard(limits=limits)
+        # The Director may hand this run a budget it already owns, so that
+        # research and strategy draw down one ledger rather than two.
+        shared_budget = (getattr(ctx, "extra", {}) or {}).get("budget_guard")
+        guard = ExecutionGuard(limits=limits, shared_budget=shared_budget)
 
         objectives = payload.business_objectives or ["developer_acquisition"]
         invalid_objectives = [o for o in objectives if o not in BUSINESS_OBJECTIVES]

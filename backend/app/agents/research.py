@@ -265,10 +265,15 @@ class ResearchAgent(BaseAgent[ResearchInput, ResearchOutput]):
         # ---- limits -----------------------------------------------------
         limits = ExecutionLimits.for_research(settings)
         if payload.max_cost_usd is not None:
+            # Phase 2.6: a provided envelope is authoritative, including 0.0,
+            # which now blocks all paid work instead of meaning "unlimited".
             limits.max_cost_usd = max(0.0, float(payload.max_cost_usd))
+        # The Director may hand this run a budget it already owns, so that
+        # research and strategy draw down one ledger rather than two.
+        shared_budget = (getattr(ctx, "extra", {}) or {}).get("budget_guard")
         if payload.max_iterations is not None:
             limits.max_iterations = max(1, int(payload.max_iterations))
-        guard = ExecutionGuard(limits=limits)
+        guard = ExecutionGuard(limits=limits, shared_budget=shared_budget)
 
         categories = payload.categories or list(RESEARCH_CATEGORIES)
         unknown = [c for c in categories if c not in RESEARCH_CATEGORIES]

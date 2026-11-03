@@ -39,6 +39,24 @@ def settings(**overrides) -> Settings:
     return Settings(**base)
 
 
+def priced_settings(**overrides) -> Settings:
+    """Settings for the budget tests, with operator-supplied (verified) prices.
+
+    Phase 2.6 blocks paid execution when the model price is an unverified
+    placeholder. The budget tests are about *envelopes*, not pricing, so they
+    run against a priced deployment the same way a real one would.
+    """
+    return settings(
+        llm_pricing_json={
+            # Matches the openrouter fallback these tests were calibrated against
+            # ($0.001 in / $0.003 out per 1k) so the envelopes stay comparable.
+            "deepseek-v4.1-flash": {"input_per_1k": 0.001, "output_per_1k": 0.003},
+            "qwen-3.7-flash": {"input_per_1k": 0.001, "output_per_1k": 0.003},
+        },
+        **overrides,
+    )
+
+
 class FakeProvider:
     """Records calls and returns a deterministic structured response."""
 
@@ -225,7 +243,7 @@ def test_router_estimate_reports_route_and_cost():
 async def test_budget_allows_call_within_envelope():
     provider = FakeProvider(cost=0.001)
     guard = BudgetGuard(max_cost_usd=1.0, max_tokens=10_000, max_tool_calls=5)
-    gw = gateway(provider, settings())
+    gw = gateway(provider, priced_settings())
     response = await gw.structured(
         agent_name="research", request=request(), task_class="classification", budget=guard
     )
@@ -240,7 +258,7 @@ async def test_budget_blocks_before_spending():
     provider = FakeProvider(cost=0.5)
     # A budget far below even the cheapest realistic estimate.
     guard = BudgetGuard(max_cost_usd=0.0000001, max_tokens=10_000)
-    gw = gateway(provider, settings())
+    gw = gateway(provider, priced_settings())
 
     from app.llm.base import BudgetExceeded
 
@@ -261,7 +279,7 @@ async def test_actual_cost_overspend_stops_further_calls():
     """
     provider = FakeProvider(cost=0.5)  # far above the estimate for this prompt
     guard = BudgetGuard(max_cost_usd=0.01, max_tokens=10_000)
-    gw = gateway(provider, settings())
+    gw = gateway(provider, priced_settings())
 
     await gw.structured(
         agent_name="research", request=request(), task_class="classification", budget=guard
@@ -283,7 +301,7 @@ async def test_actual_cost_overspend_stops_further_calls():
 async def test_budget_exhausts_after_spending_and_reports_remaining():
     provider = FakeProvider(cost=0.01)
     guard = BudgetGuard(max_cost_usd=0.015, max_tokens=10_000)
-    gw = gateway(provider, settings())
+    gw = gateway(provider, priced_settings())
 
     await gw.structured(
         agent_name="research", request=request(), task_class="classification", budget=guard
@@ -308,7 +326,7 @@ async def test_budget_exhausts_after_spending_and_reports_remaining():
 async def test_token_budget_blocks_call():
     provider = FakeProvider()
     guard = BudgetGuard(max_cost_usd=10.0, max_tokens=10)
-    gw = gateway(provider, settings())
+    gw = gateway(provider, priced_settings())
     from app.llm.base import BudgetExceeded
 
     with pytest.raises(BudgetExceeded):
@@ -326,7 +344,7 @@ async def test_tool_call_budget_blocks_call():
     provider = FakeProvider(cost=0.0001)
     guard = BudgetGuard(max_cost_usd=10.0, max_tokens=100_000, max_tool_calls=1)
     guard.record(cost_usd=0.0001, tokens=10, tool_calls=1)
-    gw = gateway(provider, settings())
+    gw = gateway(provider, priced_settings())
     from app.llm.base import BudgetExceeded
 
     with pytest.raises(BudgetExceeded):

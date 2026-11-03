@@ -162,6 +162,12 @@ class ReconciliationRejected(CoordinatorError):
     code = "flow_reconciliation_rejected"
 
 
+class UntrustedArtifact(proto.FlowProtocolError):
+    """The installed artifact is not independently verified."""
+
+    code = "flow_untrusted_artifact"
+
+
 class CommandTransport(Protocol):
     """The only I/O the coordinator needs. The bridge implements it over WS."""
 
@@ -246,6 +252,7 @@ class GenerationCoordinator:
         transport: CommandTransport,
         *,
         live_generation_enabled: bool = False,
+        trust_provider: Callable[[], Any] | None = None,
         max_live_jobs: int = 1,
         command_timeout: float = 120.0,
         export_max_bytes: int = 25 * 1024 * 1024,
@@ -255,6 +262,10 @@ class GenerationCoordinator:
             raise ValueError("max_live_jobs must be >= 1")
         self.transport = transport
         self.live_generation_enabled = live_generation_enabled
+        #: Phase 3C.2.2 §9: when supplied, a generation may only proceed while the
+        #: provider reports a VERIFIED installed artifact. The bridge always supplies
+        #: one; tests that exercise the lifecycle in isolation do not need to.
+        self.trust_provider = trust_provider
         self.max_live_jobs = max_live_jobs
         self.command_timeout = command_timeout
         self.export_max_bytes = export_max_bytes
@@ -319,6 +330,15 @@ class GenerationCoordinator:
             # Checked before anything touches a transport: no request is built,
             # no command is written, no socket is opened.
             raise LiveGenerationDisabled()
+        if self.trust_provider is not None:
+            decision = self.trust_provider()
+            if not getattr(decision, "trusted", False):
+                state = getattr(decision, "state", "UNVERIFIED")
+                raise UntrustedArtifact(
+                    "The installed extension is not verified, so no generation may be "
+                    f"dispatched (trust state {state}).",
+                    details={"trust_state": state},
+                )
         if not approval_binding:
             raise ApprovalRequired()
 

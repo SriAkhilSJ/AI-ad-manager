@@ -132,7 +132,17 @@ TRUST_STATE_VERIFIED = "VERIFIED"
 TRUST_STATE_UNVERIFIED = "UNVERIFIED"
 
 #: The signed release manifest a distributor may publish out of band.
-RELEASE_MANIFEST_SCHEMA = "crusor.flow.release.v1"
+RELEASE_MANIFEST_SCHEMA = "crusor.flow.release.v2"
+#: Phase 3C.2.1 manifests. Still readable, but they describe a single artifact and
+#: therefore cannot establish the identity of every executable component.
+RELEASE_MANIFEST_SCHEMA_V1 = "crusor.flow.release.v1"
+SUPPORTED_MANIFEST_SCHEMAS = (RELEASE_MANIFEST_SCHEMA, RELEASE_MANIFEST_SCHEMA_V1)
+
+#: Executable components a signed release may identify individually.
+COMPONENT_EXTENSION = "chrome_extension"
+COMPONENT_MCP = "mcp_server"
+COMPONENT_COMPANION = "local_companion"
+KNOWN_COMPONENTS = (COMPONENT_EXTENSION, COMPONENT_MCP, COMPONENT_COMPANION)
 
 ANCHOR_NONE = "none"
 ANCHOR_PINNED = "pinned_digest"
@@ -154,10 +164,29 @@ class TrustAnchor:
     release: str = ""
     source_commit: str = ""
     signature_verified: bool = False
+    #: Phase 3C.2.2 — a manifest may identify each executable component.
+    schema: str = ""
+    product: str = ""
+    extension_id: str = ""
+    build_id: str = ""
+    protocol: str = ""
+    released_at: str = ""
+    components: dict[str, str] = field(default_factory=dict)
+    required_components: tuple[str, ...] = ()
 
     @property
     def present(self) -> bool:
         return self.source != ANCHOR_NONE and bool(self.artifact_sha256)
+
+    @property
+    def identifies_components(self) -> bool:
+        """A live integration needs per-component identity, not one blob digest."""
+        return bool(self.components) and COMPONENT_EXTENSION in self.components
+
+    def digest_for(self, component: str) -> str:
+        if component == COMPONENT_EXTENSION and not self.components:
+            return self.artifact_sha256
+        return self.components.get(component, "")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -166,6 +195,15 @@ class TrustAnchor:
             "release": self.release,
             "source_commit": self.source_commit,
             "signature_verified": self.signature_verified,
+            "schema": self.schema,
+            "product": self.product,
+            "extension_id": self.extension_id,
+            "build_id": self.build_id,
+            "protocol": self.protocol,
+            "released_at": self.released_at,
+            "components": dict(self.components),
+            "required_components": list(self.required_components),
+            "identifies_components": self.identifies_components,
         }
 
 
@@ -241,7 +279,7 @@ def verify_release_manifest(path: str | Path, public_key_b64: str) -> TrustAncho
             "The release manifest could not be read as JSON.",
             details={"field": "release_manifest"},
         ) from exc
-    if not isinstance(document, dict) or document.get("schema") != RELEASE_MANIFEST_SCHEMA:
+    if not isinstance(document, dict) or document.get("schema") not in SUPPORTED_MANIFEST_SCHEMAS:
         raise ProvenanceRejected(
             "The release manifest did not declare a supported schema.",
             details={"field": "release_manifest_schema"},
@@ -282,20 +320,73 @@ def verify_release_manifest(path: str | Path, public_key_b64: str) -> TrustAncho
             details={"field": "release_manifest_signature"},
         ) from exc
 
-    artifact = document.get("artifact") if isinstance(document.get("artifact"), dict) else {}
     release = document.get("release") if isinstance(document.get("release"), dict) else {}
-    digest = str(artifact.get("sha256") or "").strip().lower()
+    schema = str(document.get("schema") or "")
+
+    components: dict[str, str] = {}
+    required: list[str] = []
+    extension_id = ""
+    protocol = ""
+    build_id = ""
+    for entry in document.get("components") or []:
+        if not isinstance(entry, dict):
+            raise ProvenanceRejected(
+                "A component entry in the signed manifest was malformed.",
+                details={"field": "release_manifest_components"},
+            )
+        name = str(entry.get("name") or "").strip()
+        if name not in KNOWN_COMPONENTS:
+            raise ProvenanceRejected(
+                f"The signed manifest identified an unknown component {name!r}.",
+                details={"field": "release_manifest_components", "component": name},
+            )
+        digest_value = str(entry.get("sha256") or "").strip().lower()
+        if not SHA256.match(digest_value):
+            raise ProvenanceRejected(
+                f"The signed manifest gave component {name!r} no SHA-256 digest.",
+                details={"field": "release_manifest_components", "component": name},
+            )
+        components[name] = digest_value
+        if bool(entry.get("required")):
+            required.append(name)
+        if name == COMPONENT_EXTENSION:
+            extension_id = str(entry.get("extension_id") or "").strip()
+            protocol = str(entry.get("protocol") or "").strip()
+            build_id = str(entry.get("build_id") or "").strip()
+
+    extension = document.get("extension") if isinstance(document.get("extension"), dict) else {}
+    artifact = document.get("artifact") if isinstance(document.get("artifact"), dict) else {}
+    digest = str(
+        artifact.get("sha256") or extension.get("sha256") or components.get(COMPONENT_EXTENSION) or ""
+    ).strip().lower()
     if not SHA256.match(digest):
         raise ProvenanceRejected(
             "The signed release manifest did not state a SHA-256 artifact digest.",
             details={"field": "release_manifest_artifact"},
         )
+    if components and COMPONENT_EXTENSION in components and components[COMPONENT_EXTENSION] != digest:
+        raise ProvenanceRejected(
+            "The signed manifest disagrees with itself about the extension digest.",
+            details={"field": "release_manifest_artifact"},
+        )
+    extension_id = extension_id or str(extension.get("id") or "").strip()
+    protocol = protocol or str(extension.get("protocol") or "").strip()
+    build_id = build_id or str(release.get("build_id") or "").strip()
+
     return TrustAnchor(
         source=ANCHOR_MANIFEST,
         artifact_sha256=digest,
         release=str(release.get("version") or "").strip(),
         source_commit=str(release.get("commit") or "").strip().lower(),
         signature_verified=True,
+        schema=schema,
+        product=str(document.get("product") or "").strip(),
+        extension_id=extension_id,
+        build_id=build_id,
+        protocol=protocol,
+        released_at=str(release.get("released_at") or "").strip(),
+        components=components,
+        required_components=tuple(required),
     )
 
 

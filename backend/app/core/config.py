@@ -214,6 +214,21 @@ class Settings(BaseSettings):
     flow_trusted_source_commit: str = ""
     flow_release_manifest_path: str = ""
     flow_release_manifest_public_key: str = ""
+    #: ---- Phase 3C.2.2 independent installed-artifact verification -----------
+    #: Where the extension is actually installed. Discovery is explicit: the
+    #: verifier never searches for a plausible-looking directory.
+    flow_extension_install_root: str = ""
+    #: ``versioned`` = Chrome's Extensions/<id>/<version>/ layout; ``directory`` =
+    #: an unpacked build whose identity comes from the manifest key.
+    flow_extension_install_layout: str = "versioned"
+    #: Require a challenge-bound measurement before a session may be trusted.
+    flow_require_installed_measurement: bool = False
+    flow_measurement_challenge_ttl_seconds: float = 120.0
+    flow_measurement_freshness_seconds: float = 300.0
+    #: Separately installed executables that must be measured too when required.
+    flow_mcp_install_root: str = ""
+    flow_companion_install_root: str = ""
+    flow_required_components: str = "chrome_extension"
     #: The companion reaches Crusor outbound; Crusor never dials the loopback port.
     flow_companion_id: str = ""
     flow_companion_secret: str = ""

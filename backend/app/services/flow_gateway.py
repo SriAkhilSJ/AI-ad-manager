@@ -39,7 +39,13 @@ from app.core.errors import IntegrationUnavailableError, NotFoundError, Validati
 from app.creative.media import inspect_media
 from app.flow import protocol as proto
 from app.flow.security import constant_time_equals, secret_fingerprint
-from app.flow.provenance import TrustPolicy
+from app.flow.provenance import (
+    COMPONENT_EXTENSION,
+    TrustAnchor,
+    TrustPolicy,
+    resolve_trust_anchor,
+)
+from app.flow.trust import get_registry, trust_status_payload
 from app.flow.source_gate import source_gate_payload
 from app.models.content import ContentItem
 from app.models.creative import CreativeAsset, CreativeKind
@@ -767,9 +773,33 @@ def flow_status_payload(
 ) -> dict[str, Any]:
     """The honest status block used by ``/flow/status`` and ``/system/status``."""
     trust_policy = TrustPolicy.from_settings(settings)
+    anchor = TrustAnchor()
+    anchor_error = ""
+    if trust_policy.has_anchor:
+        try:
+            anchor = resolve_trust_anchor(trust_policy)
+        except Exception as exc:  # noqa: BLE001 - an anchor that cannot verify proves nothing
+            anchor_error = getattr(exc, "code", "release_anchor_invalid")
+    registry = get_registry()
+    trust_block = trust_status_payload(
+        policy_anchor=anchor,
+        decision=registry.latest(),
+        registry=registry,
+        source_gate_status=source_gate_payload(
+            getattr(settings, "flow_source_package_path", ""),
+            attestation_path=getattr(settings, "flow_authorization_attestation_path", ""),
+        )["status"],
+        required_components=tuple(
+            item.strip()
+            for item in str(getattr(settings, "flow_required_components", "chrome_extension")).split(",")
+            if item.strip()
+        ) or (COMPONENT_EXTENSION,),
+    )
+    if anchor_error:
+        trust_block["anchor"]["error"] = anchor_error
     return {
         "integration": "google_flow_connector",
-        "phase": "3C.2.1",
+        "phase": "3C.2.2",
         "available": False,
         "enabled": False,
         "live_generation_enabled": bool(settings.flow_live_generation_enabled),
@@ -817,6 +847,7 @@ def flow_status_payload(
             getattr(settings, "flow_source_package_path", ""),
             attestation_path=getattr(settings, "flow_authorization_attestation_path", ""),
         ),
+        "trust": trust_block,
         "protocol": {
             "supported": list(proto.SUPPORTED_PROTOCOLS),
             "trust_semantics": {

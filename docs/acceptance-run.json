@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-11-03T20:01:34Z",
+  "generated_at": "2026-11-03T20:54:50Z",
   "base_url": "http://127.0.0.1:8000",
-  "passed": 61,
-  "total": 61,
+  "passed": 64,
+  "total": 64,
   "criteria": [
     {
       "criterion": "1. Backend starts",
       "passed": true,
-      "detail": "liveness 200 (uptime 13.1s); /system/status reachable pre-auth -> 200"
+      "detail": "liveness 200 (uptime 1056.2s); /system/status reachable pre-auth -> 200"
     },
     {
       "criterion": "1b. /system/status reports every integration honestly",
@@ -32,22 +32,22 @@
     {
       "criterion": "5. Director initialises a stateful workflow",
       "passed": true,
-      "detail": "15 nodes, interrupt at human_approval; workflow wf_9ff1ae9f61504342 produced 3 drafts in 8 iterations and is awaiting approval"
+      "detail": "15 nodes, interrupt at human_approval; workflow wf_b8d5d18f231c4d23 produced 3 drafts in 8 iterations and is awaiting approval"
     },
     {
       "criterion": "6. All six agents invocable through structured interfaces",
       "passed": true,
-      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run e853fb19\u2026, 3 trace events)"
+      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run a747c488\u2026, 3 trace events)"
     },
     {
       "criterion": "7. Workflow state persists across restarts",
       "passed": true,
-      "detail": "a fresh process reconstructed thread wf_9ff1ae9f61504342: 23 checkpoints, identical plan and content ids"
+      "detail": "a fresh process reconstructed thread wf_b8d5d18f231c4d23: 23 checkpoints, identical plan and content ids"
     },
     {
       "criterion": "8. Content create + immutable version history",
       "passed": true,
-      "detail": "content 2ae6f762\u2026 now at v2 with distinct content hashes"
+      "detail": "content ebb9f017\u2026 now at v2 with distinct content hashes"
     },
     {
       "criterion": "9. Approval state machine + invalidation on edit",
@@ -62,12 +62,12 @@
     {
       "criterion": "11. Model usage and cost are recordable",
       "passed": true,
-      "detail": "usage ledger 134441 -> 136041 tokens, $0.0840 -> $0.0882 across 2 provider row(s)"
+      "detail": "usage ledger 151181 -> 152781 tokens, $0.0924 -> $0.0966 across 2 provider row(s)"
     },
     {
       "criterion": "12. Automated test suite passes",
       "passed": true,
-      "detail": "813 tests, 0 failures, 0 errors"
+      "detail": "881 tests, 0 failures, 0 errors"
     },
     {
       "criterion": "13. Architecture documentation is complete",
@@ -102,7 +102,7 @@
     {
       "criterion": "19. Director orchestrates agents and gates on approval",
       "passed": true,
-      "detail": "workflow strat_ec8f914cd1d54aa8: 7 trace entries (reused 846 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
+      "detail": "workflow strat_183bfcdb9da84e70: 7 trace entries (reused 918 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
     },
     {
       "criterion": "20. Usage, cost and budget enforcement",
@@ -127,12 +127,12 @@
     {
       "criterion": "24. Drafts are platform-specific and campaign-linked",
       "passed": true,
-      "detail": "6 drafts linked to campaign 008fe587-09fd-4a68-a300-954714aba3ee: linkedin/social_post 213ch, x/social_post 46ch, instagram/caption 163ch, youtube/short_form_video_script 324ch, facebook/social_post 185ch, reddit/community_discussion 406ch"
+      "detail": "6 drafts linked to campaign 044cbd97-2a77-43c1-90ce-5f21bb0fbcd4: linkedin/social_post 213ch, x/social_post 46ch, instagram/caption 163ch, youtube/short_form_video_script 324ch, facebook/social_post 185ch, reddit/community_discussion 406ch"
     },
     {
       "criterion": "25. Brand Guardian validates drafts",
       "passed": true,
-      "detail": "verdict PASS after 18 rules; 2 validation row(s) persisted for version d32c99b3"
+      "detail": "verdict PASS after 18 rules; 2 validation row(s) persisted for version f456f489"
     },
     {
       "criterion": "26. Unsupported claims are blocked",
@@ -142,12 +142,12 @@
     {
       "criterion": "27. Editing creates a new version",
       "passed": true,
-      "detail": "v1 -> v2; original version d32c99b3 unchanged"
+      "detail": "v1 -> v2; original version f456f489 unchanged"
     },
     {
       "criterion": "28. Approval is version-bound and edits invalidate it",
       "passed": true,
-      "detail": "approval bound to version c71cd47f; editing invalidated it while keeping 2 approval record(s) and the approved text intact"
+      "detail": "approval bound to version d7705c1b; editing invalidated it while keeping 2 approval record(s) and the approved text intact"
     },
     {
       "criterion": "29. Internal calendar can be updated",
@@ -177,12 +177,12 @@
     {
       "criterion": "34. Generation is idempotent",
       "passed": true,
-      "detail": "plan retry returned plan c13e4422 with 6 slots; generate retry returned item 65378bf5"
+      "detail": "plan retry returned plan 3771a1bc with 6 slots; generate retry returned item e7b0c7db"
     },
     {
       "criterion": "35. Phase 1 and Phase 2 acceptance is intact",
       "passed": true,
-      "detail": "all 23 Phase 1/2 checks still pass alongside the Phase 3A criteria; studio overview reports 242 drafts"
+      "detail": "all 23 Phase 1/2 checks still pass alongside the Phase 3A criteria; studio overview reports 268 drafts"
     },
     {
       "criterion": "36. Creative briefs are creatable from a content version",
@@ -192,7 +192,7 @@
     {
       "criterion": "37. Mock image generation executes and is idempotent",
       "passed": true,
-      "detail": "job mock:1793736090:7f7405ff4b104727:e\u2026 succeeded on mock at $0.0; replay returned the same job"
+      "detail": "job mock:1793739284:0e2972a290792d7f:e\u2026 succeeded on mock at $0.0; replay returned the same job"
     },
     {
       "criterion": "38. Video generation is labelled a poster, not a video",
@@ -217,12 +217,12 @@
     {
       "criterion": "42. Content, brief and asset versions are linked",
       "passed": true,
-      "detail": "asset v1 \u2192 brief v1 \u2192 content version d53568b1 \u2192 job fd090a1a"
+      "detail": "asset v1 \u2192 brief v1 \u2192 content version 7b6cb95e \u2192 job f06bdfc8"
     },
     {
       "criterion": "43. Approval binds content + brief + asset and enforces invalidation",
       "passed": true,
-      "detail": "approval bound asset ac1d7e81 v1 + brief v1 + content version; selecting another asset invalidated 1 approval(s)"
+      "detail": "approval bound asset f7656cc2 v1 + brief v1 + content version; selecting another asset invalidated 1 approval(s)"
     },
     {
       "criterion": "44. Flow is not falsely active and paid generation is disabled",
@@ -232,7 +232,7 @@
     {
       "criterion": "45. No creative publishing or scheduling endpoint exists",
       "passed": true,
-      "detail": "/publishing=404; /publish=404; /creative-studio/publish=404; /creative-studio/assets/ac1d7e81-a05b-4bbe-b704-8aa3e7c874a9/publish=404; /creative-studio/schedule=404"
+      "detail": "/publishing=404; /publish=404; /creative-studio/publish=404; /creative-studio/assets/f7656cc2-d174-4b04-b3d5-83c0f39bd212/publish=404; /creative-studio/schedule=404"
     },
     {
       "criterion": "46. Frontend build ships the Creative Studio UI",
@@ -242,12 +242,12 @@
     {
       "criterion": "47. Phase 1/2/2.5/2.6/3A acceptance is intact",
       "passed": true,
-      "detail": "all 47 earlier checks still pass; creative overview reports 39 assets (32 mock), 32 succeeded jobs"
+      "detail": "all 47 earlier checks still pass; creative overview reports 49 assets (38 mock), 38 succeeded jobs"
     },
     {
       "criterion": "48. Flow status is honest and live generation is off",
       "passed": true,
-      "detail": "phase 3C.2.1, bind_host=127.0.0.1, loopback_only=true, live_generation=false, max_live_jobs=1, 7 upstream blockers reported (generation off)"
+      "detail": "phase 3C.2.2, bind_host=127.0.0.1, loopback_only=true, live_generation=false, max_live_jobs=1, 7 upstream blockers reported (generation off)"
     },
     {
       "criterion": "49. Dangerous Flow commands are denied by name",
@@ -257,7 +257,7 @@
     {
       "criterion": "50. The local bridge binds loopback only and authenticates",
       "passed": true,
-      "detail": "0.0.0.0 bind refused; sockets 127.0.0.1:40099 and 127.0.0.1:44921; unauth=401, denied=403, bad_host=421, oversize=413, unpaired=503"
+      "detail": "0.0.0.0 bind refused; sockets 127.0.0.1:41551 and 127.0.0.1:45745; unauth=401, denied=403, bad_host=421, oversize=413, unpaired=503"
     },
     {
       "criterion": "51. The companion endpoint rejects unauthenticated callers",
@@ -267,7 +267,7 @@
     {
       "criterion": "52. Flow generation is blocked by the approval gate",
       "passed": true,
-      "detail": "generation refused with flow_approval_required (403) with and without dry_run; binding hash 42194ec4d27efd27\u2026 explains what a founder must approve"
+      "detail": "generation refused with flow_approval_required (403) with and without dry_run; binding hash d3eae9a2f2d599dd\u2026 explains what a founder must approve"
     },
     {
       "criterion": "53. The local companion has a safe executable module entry point",
@@ -308,6 +308,21 @@
       "criterion": "60. Export tickets are bound to their own URL",
       "passed": true,
       "detail": "token for ticket B posted to ticket A's URL refused 422 with no mutation on either ticket (no staging object, no asset); the correct pairing still consumes and verifies the asset"
+    },
+    {
+      "criterion": "61. Installed-artifact trust is UNVERIFIED without a measurement",
+      "passed": true,
+      "detail": "trust state UNVERIFIED (not trusted); measured=false, digest=false, runtime correlation=false; 3 components unverified; live generation off"
+    },
+    {
+      "criterion": "62. Installed bytes are measured and matched to a signed release",
+      "passed": true,
+      "detail": "synthetic install measured to the same sha256-tree-v1 digest as the gate; signed v2 manifest verified and matched per component; a tampered manifest was rejected; one patched file changed the digest; a symlink was refused"
+    },
+    {
+      "criterion": "63. Live generation requires verification, not a flag",
+      "passed": true,
+      "detail": "flag off blocks regardless of trust; a VERIFIED fixture still cannot generate while the flag is off; UNVERIFIED blocks with the flag on; the coordinator refused flow_untrusted_artifact and dispatched nothing"
     }
   ]
 }

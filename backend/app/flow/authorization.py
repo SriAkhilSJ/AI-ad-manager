@@ -52,7 +52,8 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from collections.abc import Iterable
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -69,13 +70,35 @@ MIN_EVIDENCE_BYTES = 8
 _DIGEST_EXCLUDES = {".git", "__pycache__", "node_modules", ".venv", ".mypy_cache"}
 
 
+def tree_digest_from_pairs(pairs: Iterable[tuple[str, bytes]]) -> str:
+    """The single ``sha256-tree-v1`` implementation.
+
+    Sorted by POSIX relative path; each path and payload length-prefixed so moving
+    bytes between files cannot produce the same digest. Every producer of a package
+    digest — the authorization gate and, since Phase 3C.2.2, the installed-artifact
+    verifier — must call this function rather than reimplementing the encoding, or
+    two "matching" digests could disagree about what they measured.
+    """
+    digest = hashlib.sha256()
+    for relative, data in sorted(pairs, key=lambda item: item[0]):
+        encoded = relative.encode("utf-8")
+        digest.update(len(encoded).to_bytes(4, "big"))
+        digest.update(encoded)
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.hexdigest()
+
+
+def digest_excluded(relative: PurePosixPath | Path) -> bool:
+    """Paths never included in a tree digest: VCS internals and build caches."""
+    return bool(set(PurePosixPath(relative).parts) & _DIGEST_EXCLUDES)
+
+
 def package_tree_digest(root: str | Path) -> str:
     """Deterministic SHA-256 over the package's relative paths and file bytes.
 
-    Sorted by POSIX relative path, and each path and payload is length-prefixed so
-    that moving bytes between files cannot produce the same digest. Symbolic links
-    and anything outside the root are ignored: a package digest must describe the
-    files actually in the package, not what they point at.
+    Symbolic links and anything outside the root are ignored: a package digest
+    must describe the files actually in the package, not what they point at.
     """
     base = Path(root).resolve()
     entries: list[tuple[str, bytes]] = []
@@ -83,18 +106,10 @@ def package_tree_digest(root: str | Path) -> str:
         if not path.is_file() or path.is_symlink():
             continue
         relative = path.relative_to(base)
-        if set(relative.parts) & _DIGEST_EXCLUDES:
+        if digest_excluded(relative):
             continue
         entries.append((relative.as_posix(), path.read_bytes()))
-
-    digest = hashlib.sha256()
-    for relative, data in entries:
-        encoded = relative.encode("utf-8")
-        digest.update(len(encoded).to_bytes(4, "big"))
-        digest.update(encoded)
-        digest.update(len(data).to_bytes(8, "big"))
-        digest.update(data)
-    return digest.hexdigest()
+    return tree_digest_from_pairs(entries)
 
 
 @dataclass(frozen=True, slots=True)

@@ -52,6 +52,9 @@ WS_CLOSE_UNAUTHORIZED = 4401
 WS_CLOSE_SUPERSEDED = 4000
 WS_CLOSE_PROVENANCE = 4422
 WS_CLOSE_PROTOCOL = 4426
+#: Phase 3C.2.2: the session's installed-artifact attestation was rejected (bad
+#: challenge, replay, expired measurement, identity mismatch).
+WS_CLOSE_MEASUREMENT = 4428
 
 #: Fields a HELLO must carry before the bridge will exchange a single command.
 REQUIRED_PROVENANCE_FIELDS: tuple[str, ...] = (
@@ -374,6 +377,48 @@ class HeartbeatMessage(BaseModel):
     type: Literal["heartbeat"] = "heartbeat"
     flow_tab_present: bool = False
     busy: bool = False
+
+
+class VerificationChallengeMessage(BaseModel):
+    """Bridge -> companion: prove what is installed, for *this* session only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["verification_challenge"] = "verification_challenge"
+    challenge_id: str = Field(min_length=8, max_length=64)
+    nonce: str = Field(min_length=16, max_length=256)
+    session_id: str = Field(min_length=1, max_length=64)
+    expires_at: str
+    digest_algorithm: str = "sha256-tree-v1"
+    expected_extension_id: str = ""
+    required_components: list[str] = Field(default_factory=list)
+
+
+class ComponentMeasurementMessage(BaseModel):
+    """One measured component. Digests are lowercase SHA-256 of the tree."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=64)
+    digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    extension_id: str = Field(default="", max_length=128)
+    version: str = Field(default="", max_length=64)
+    measurement_id: str = Field(default="", max_length=64)
+    measured_at: float = 0.0
+    file_count: int = 0
+    limitations: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list)
+
+
+class VerificationReportMessage(BaseModel):
+    """Companion -> bridge: the answer to one specific challenge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["verification_report"] = "verification_report"
+    challenge_id: str = Field(min_length=8, max_length=64)
+    nonce: str = Field(min_length=16, max_length=256)
+    components: list[ComponentMeasurementMessage] = Field(default_factory=list, max_length=8)
 
 
 class CommandEnvelope(BaseModel):

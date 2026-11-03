@@ -1784,7 +1784,7 @@ def main() -> int:
         _, status = http.call("GET", f"{flow}/status", expect=200)
         # The label follows the current hardening milestone; every boundary below
         # is still the Phase 3C.1 one and is asserted unchanged.
-        assert status["phase"] == "3C.2.1"
+        assert status["phase"] == "3C.2.2"
         assert status["live_generation_enabled"] is False
         assert status["available"] is False and status["enabled"] is False
         bridge = status["bridge"]
@@ -1809,7 +1809,7 @@ def main() -> int:
         _, system = http.call("GET", "/system/status", expect=200)
         assert system["flow"]["live_generation_enabled"] is False
         return (
-            f"phase 3C.2.1, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
+            f"phase 3C.2.2, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
             f"max_live_jobs=1, {len(blockers)} upstream blockers reported (generation off)"
         )
 
@@ -2497,6 +2497,203 @@ def main() -> int:
         )
 
     harness.check("60. Export tickets are bound to their own URL", c60)
+
+    def c61_src() -> str:
+        """The trust boundary is reported honestly: no measurement means no trust."""
+        _, status = http.call("GET", f"{flow}/status", expect=200)
+        trust = status["trust"]
+        assert trust["trusted"] is False, trust
+        assert trust["state"] in {
+            "SOURCE_ABSENT",
+            "RELEASE_ANCHOR_MISSING",
+            "INSTALLED_ARTIFACT_NOT_FOUND",
+            "UNVERIFIED",
+        }, trust["state"]
+        assert len(trust["states_supported"]) == 9
+        assert trust["evidence"]["installed_artifact_measured"] is False
+        assert trust["evidence"]["installed_artifact_digest_matches_anchor"] is False
+        assert trust["evidence"]["runtime_identity_correlated"] is False
+        assert trust["measured"]["artifact_digest"] == ""
+        assert "chrome_extension" in trust["unverified_components"]
+        assert trust["anchor"]["present"] is False
+        assert status["live_generation_enabled"] is False
+        return (
+            f"trust state {trust['state']} (not trusted); measured=false, digest=false, "
+            f"runtime correlation=false; {len(trust['unverified_components'])} components "
+            "unverified; live generation off"
+        )
+
+    harness.check("61. Installed-artifact trust is UNVERIFIED without a measurement", c61_src)
+
+    def c62() -> str:
+        """A synthetic install is measured independently and matched to a signed release."""
+        code = (
+            "import base64, hashlib, json, tempfile, time\n"
+            "from pathlib import Path\n"
+            "from cryptography.hazmat.primitives import serialization\n"
+            "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey\n"
+            "from app.flow.authorization import package_tree_digest\n"
+            "from app.flow.installed_artifact import (InstalledArtifactVerifier, InstallationSpec,\n"
+            "    MeasurementError, MeasurementPolicy)\n"
+            "from app.flow.provenance import COMPONENT_EXTENSION, verify_release_manifest\n"
+            "EXT = 'abcdefghijklmnopabcdefghijklmnop'\n"
+            "VERSION = '1.3.0'\n"
+            "base = Path(tempfile.mkdtemp())\n"
+            "root = base / 'Extensions' / EXT / VERSION\n"
+            "(root / 'sub').mkdir(parents=True)\n"
+            "manifest = {'manifest_version': 3, 'name': 'Synthetic', 'version': VERSION,\n"
+            "            'background': {'service_worker': 'sw.js'}}\n"
+            "(root / 'manifest.json').write_text(json.dumps(manifest))\n"
+            "(root / 'sw.js').write_text('// synthetic sw\\n')\n"
+            "(root / 'sub' / 'content.js').write_text('// synthetic content\\n')\n"
+            "spec = InstallationSpec(root=root, expected_extension_id=EXT, expected_version=VERSION)\n"
+            "report = InstalledArtifactVerifier().measure(spec)\n"
+            "out = {}\n"
+            "out['digest_matches_gate'] = report.digest == package_tree_digest(root)\n"
+            "out['measured_id'] = report.extension_id\n"
+            "out['file_count'] = report.file_count\n"
+            "private = Ed25519PrivateKey.generate()\n"
+            "public = base64.b64encode(private.public_key().public_bytes(\n"
+            "    encoding=serialization.Encoding.Raw,\n"
+            "    format=serialization.PublicFormat.Raw)).decode()\n"
+            "def document(digest):\n"
+            "    return {'schema': 'crusor.flow.release.v2', 'product': 'synthetic-fixture',\n"
+            "        'release': {'version': VERSION, 'commit': '0343884', 'build_id': 'b1'},\n"
+            "        'extension': {'id': EXT, 'version': VERSION, 'protocol': 'flow.bridge.v1',\n"
+            "                      'sha256': digest},\n"
+            "        'components': [{'name': COMPONENT_EXTENSION, 'sha256': digest,\n"
+            "                        'extension_id': EXT, 'required': True}]}\n"
+            "def sign(doc):\n"
+            "    body = {k: v for k, v in doc.items() if k != 'signature'}\n"
+            "    canonical = json.dumps(body, sort_keys=True, separators=(',', ':')).encode()\n"
+            "    return {**body, 'signature': base64.b64encode(private.sign(canonical)).decode()}\n"
+            "path = base / 'release.json'\n"
+            "path.write_text(json.dumps(sign(document(report.digest))))\n"
+            "anchor = verify_release_manifest(path, public)\n"
+            "out['anchor_digest_matches'] = anchor.digest_for(COMPONENT_EXTENSION) == report.digest\n"
+            "out['anchor_identifies_components'] = anchor.identifies_components\n"
+            "out['anchor_signature_verified'] = anchor.signature_verified\n"
+            "# Tampering means changing bytes *after* signing; re-signing a new\n"
+            "# document would be a valid signature over different content.\n"
+            "tampered = sign(document(report.digest))\n"
+            "tampered['release']['version'] = '9.9.9'\n"
+            "tampered_path = base / 'tampered.json'\n"
+            "tampered_path.write_text(json.dumps(tampered))\n"
+            "try:\n"
+            "    verify_release_manifest(tampered_path, public)\n"
+            "    out['tampered'] = 'ACCEPTED'\n"
+            "except Exception as exc:\n"
+            "    out['tampered'] = getattr(exc, 'code', 'rejected')\n"
+            "(root / 'sw.js').write_text('// patched after signing\\n')\n"
+            "patched = InstalledArtifactVerifier().measure(spec)\n"
+            "out['patched_digest_differs'] = patched.digest != anchor.digest_for(COMPONENT_EXTENSION)\n"
+            "ext_link = base / 'link.js'\n"
+            "ext_link.symlink_to(root / 'sw.js')\n"
+            "(root / 'linked.js').symlink_to(ext_link)\n"
+            "try:\n"
+            "    InstalledArtifactVerifier().measure(spec)\n"
+            "    out['symlink'] = 'ACCEPTED'\n"
+            "except MeasurementError as exc:\n"
+            "    out['symlink'] = exc.code\n"
+            "print(json.dumps(out))\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr[-1500:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["digest_matches_gate"] is True, result
+        assert result["measured_id"] == "abcdefghijklmnopabcdefghijklmnop", result
+        assert result["file_count"] == 3, result
+        assert result["anchor_digest_matches"] is True, result
+        assert result["anchor_identifies_components"] is True, result
+        assert result["anchor_signature_verified"] is True, result
+        assert result["tampered"] not in {"ACCEPTED"}, result
+        assert result["patched_digest_differs"] is True, result
+        assert result["symlink"] == "symlink_in_package", result
+        return (
+            "synthetic install measured to the same sha256-tree-v1 digest as the gate; "
+            "signed v2 manifest verified and matched per component; a tampered manifest "
+            "was rejected; one patched file changed the digest; a symlink was refused"
+        )
+
+    harness.check("62. Installed bytes are measured and matched to a signed release", c62)
+
+    def c63() -> str:
+        """Live generation stays blocked by the guard, not merely by a flag."""
+        code = (
+            "import json\n"
+            "from app.flow import protocol as proto\n"
+            "from app.flow.coordinator import GenerationCoordinator, UntrustedArtifact\n"
+            "from app.flow.provenance import TrustAnchor\n"
+            "from app.flow.trust import (TrustDecision, TrustEvidence, VERIFIED, UNVERIFIED,\n"
+            "    evaluate_live_generation_guard)\n"
+            "class Transport:\n"
+            "    def __init__(self): self.sent = []\n"
+            "    async def send(self, envelope): self.sent.append(envelope)\n"
+            "    async def await_result(self, command_id, timeout):\n"
+            "        raise AssertionError('no result')\n"
+            "import asyncio\n"
+            "async def main():\n"
+            "    out = {}\n"
+            "    blocked = evaluate_live_generation_guard(live_generation_flag=False,\n"
+            "        source_gate_status='SOURCE_ABSENT', decision=None, approval_binding='a'*64,\n"
+            "        budget_configured=True, idempotency_enforced=True)\n"
+            "    out['flag_off'] = blocked.allowed\n"
+            "    out['blockers'] = list(blocked.blockers)\n"
+            "    verified = TrustDecision(state=VERIFIED, evidence=TrustEvidence(\n"
+            "        installed_artifact_measured=True, installed_artifact_digest_matches_anchor=True,\n"
+            "        runtime_identity_correlated=True, measurement_fresh=True))\n"
+            "    out['verified_but_flag_off'] = evaluate_live_generation_guard(\n"
+            "        live_generation_flag=False, source_gate_status='AUTHORIZED', decision=verified,\n"
+            "        approval_binding='a'*64, budget_configured=True,\n"
+            "        idempotency_enforced=True).allowed\n"
+            "    out['unverified_with_flag_on'] = evaluate_live_generation_guard(\n"
+            "        live_generation_flag=True, source_gate_status='AUTHORIZED',\n"
+            "        decision=TrustDecision(state=UNVERIFIED, evidence=TrustEvidence())\n"
+            "        , approval_binding='a'*64, budget_configured=True,\n"
+            "        idempotency_enforced=True).allowed\n"
+            "    transport = Transport()\n"
+            "    coordinator = GenerationCoordinator(transport, live_generation_enabled=True,\n"
+            "        trust_provider=lambda: TrustDecision(state=UNVERIFIED, evidence=TrustEvidence()))\n"
+            "    request = proto.GenerationCommand(prompt='synthetic', model='imagen-3', count=1)\n"
+            "    try:\n"
+            "        await coordinator.submit('image', request, approval_binding='a'*64)\n"
+            "        out['coordinator'] = 'DISPATCHED'\n"
+            "    except UntrustedArtifact as exc:\n"
+            "        out['coordinator'] = exc.code\n"
+            "    out['sends'] = len(transport.sent)\n"
+            "    print(json.dumps(out))\n"
+            "asyncio.run(main())\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr[-1500:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["flag_off"] is False, result
+        assert "live_generation_disabled" in result["blockers"], result
+        assert result["verified_but_flag_off"] is False, result
+        assert result["unverified_with_flag_on"] is False, result
+        assert result["coordinator"] == "flow_untrusted_artifact", result
+        assert result["sends"] == 0, result
+        return (
+            "flag off blocks regardless of trust; a VERIFIED fixture still cannot "
+            "generate while the flag is off; UNVERIFIED blocks with the flag on; the "
+            "coordinator refused flow_untrusted_artifact and dispatched nothing"
+        )
+
+    harness.check("63. Live generation requires verification, not a flag", c63)
 
 
     # ---- summary ---------------------------------------------------------

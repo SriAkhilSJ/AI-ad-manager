@@ -28,18 +28,41 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
 from app.flow import protocol as proto
 from app.flow.provenance import (
+    COMPONENT_COMPANION,
+    COMPONENT_EXTENSION,
+    COMPONENT_MCP,
     ExtensionProvenance,
     ProvenanceRejected,
+    TrustAnchor,
     TrustPolicy,
     UnsupportedProtocol,
     provenance_from_hello,
+    resolve_trust_anchor,
     verify_provenance,
+)
+from app.flow.trust import (
+    AttestationRejected,
+    ChallengeStore,
+    ComponentReport,
+    SessionAttestation,
+    TrustDecision,
+    TrustRegistry,
+    UNVERIFIED,
+    UntrustedArtifact,
+    VerificationSubmission,
+    aggregate_trust,
+    empty_decision,
+    evaluate_live_generation_guard,
+    get_registry,
+    trust_status_payload,
 )
 from app.flow.coordinator import (
     CoordinatorError,
@@ -123,6 +146,13 @@ class BridgeConfig:
     trusted_source_commit: str = ""
     release_manifest_path: str = ""
     release_manifest_public_key: str = ""
+    #: Phase 3C.2.2 — require a challenge-bound measurement of the installed
+    #: extension before the session can be trusted. Off by default so an existing
+    #: pairing still connects; live generation requires it regardless.
+    require_installed_measurement: bool = False
+    challenge_ttl_seconds: float = 120.0
+    measurement_freshness_seconds: float = 300.0
+    required_components: tuple[str, ...] = (COMPONENT_EXTENSION,)
 
     def validate(self) -> "BridgeConfig":
         assert_loopback_bind(self.host)  # raises LoopbackBindError
@@ -135,6 +165,11 @@ class BridgeConfig:
             raise BridgeConfigError("HTTP and WebSocket listeners must use different ports.")
         if self.max_request_bytes <= 0 or self.max_connections < 1:
             raise BridgeConfigError("Limits must be positive.")
+        if self.require_installed_measurement and not self.trust_policy.has_anchor:
+            raise BridgeConfigError(
+                "Installed-artifact measurement requires a trusted release anchor: a "
+                "measurement with nothing to compare against proves nothing."
+            )
         if self.live_generation_enabled and not self.trust_policy.has_anchor:
             # Turning on live generation without an independent artifact anchor
             # would let an unverified build spend real money.
@@ -172,6 +207,8 @@ class ExtensionSession:
     provenance: ExtensionProvenance | None = None
     provenance_trusted: bool = False
     provenance_state: str = "UNVERIFIED"
+    trust: TrustDecision | None = None
+    challenge_id: str = ""
     claims_well_formed: bool = False
     components_consistent: bool = False
     artifact_integrity_verified: bool = False
@@ -243,17 +280,24 @@ class FlowBridge:
             "ws_rejected_origin": 0,
             "ws_rejected_provenance": 0,
             "ws_rejected_protocol": 0,
+            "ws_rejected_measurement": 0,
             "ws_superseded": 0,
             "commands_sent": 0,
             "commands_denied": 0,
         }
         self.denied_commands: list[str] = []
+        self.challenges = ChallengeStore(ttl_seconds=config.challenge_ttl_seconds)
+        self.trust_registry = get_registry()
+        self.last_trust: TrustDecision | None = None
         self.coordinator = GenerationCoordinator(
             BridgeTransport(self),
             live_generation_enabled=False,  # Phase 3C.1: never live.
             max_live_jobs=config.max_live_jobs,
             command_timeout=config.command_timeout,
             export_max_bytes=config.export_max_bytes,
+            # Phase 3C.2.2 §9: the coordinator refuses to dispatch while the
+            # installed artifact is anything but VERIFIED, whatever a flag says.
+            trust_provider=self.current_trust,
         )
 
     # ------------------------------------------------------------------ life
@@ -654,10 +698,13 @@ class FlowBridge:
                         "components_consistent": session.components_consistent,
                         "artifact_integrity_verified": session.artifact_integrity_verified,
                         "trust_anchor": session.anchor_source,
+                        "measurement_required": self._measurement_required(),
+                        "required_components": list(self.config.required_components),
                         "provenance": session.provenance.as_dict() if session.provenance else {},
                     }
                 )
             )
+            await self._issue_challenge(session)
             await self._ws_loop(session)
         except Exception:  # noqa: BLE001
             logger.exception("flow_bridge_ws_error")
@@ -753,6 +800,10 @@ class FlowBridge:
                 session.flow_tab_present = bool(payload.get("flow_tab_present"))
                 session.busy = bool(payload.get("busy"))
                 continue
+            if kind == "verification_report":
+                if not await self._apply_verification_report(session, payload):
+                    return
+                continue
             if kind == "result":
                 envelope_id = str(payload.get("id") or "")
                 future = session.pending.pop(envelope_id, None)
@@ -765,6 +816,158 @@ class FlowBridge:
                 continue
             await session.websocket.close(code=4400, reason="unknown frame type")
             return
+
+    # --------------------------------------------------- installed artifact
+    def _measurement_required(self) -> bool:
+        """A measurement is required when an anchor exists and either the operator
+        asked for one or the policy makes it mandatory."""
+        return bool(self.config.require_installed_measurement and self.config.trust_policy.has_anchor)
+
+    def current_trust(self) -> TrustDecision:
+        """The session's trust decision, or an explicit UNVERIFIED one."""
+        decision = self.session.trust if self.session else None
+        return decision or empty_decision("no_session")
+
+    async def _issue_challenge(self, session: ExtensionSession) -> None:
+        if not self._measurement_required():
+            return
+        attestation = SessionAttestation(
+            store=self.challenges,
+            anchor=resolve_trust_anchor(self.config.trust_policy),
+            required_components=tuple(self.config.required_components),
+            freshness_seconds=self.config.measurement_freshness_seconds,
+        )
+        try:
+            challenge = attestation.issue(
+                session_id=session.session_id,
+                companion_id=session.extension_id or "",
+                extension_id=session.extension_id or "",
+            )
+        except AttestationRejected as exc:
+            self.trust_registry.audit("flow.trust.challenge_refused", code=exc.code)
+            return
+        session.challenge_id = challenge.challenge_id
+        frame = proto.VerificationChallengeMessage(
+            challenge_id=challenge.challenge_id,
+            nonce=challenge.nonce,
+            session_id=challenge.session_id,
+            expires_at=proto.iso(
+                datetime.fromtimestamp(challenge.expires_at, tz=timezone.utc)
+            ),
+            expected_extension_id=attestation.anchor.extension_id,
+            required_components=list(self.config.required_components),
+        )
+        self.trust_registry.audit(
+            "flow.trust.measurement_started",
+            session_id=session.session_id,
+            challenge_id=challenge.challenge_id,
+        )
+        try:
+            await session.websocket.send(frame.model_dump_json())
+        except Exception:  # noqa: BLE001 - the socket may already be gone
+            logger.info("flow_bridge_challenge_send_failed session=%s", session.session_id)
+
+    async def _apply_verification_report(
+        self, session: ExtensionSession, payload: dict[str, Any]
+    ) -> bool:
+        """Validate a challenge-bound measurement. Returns False to close the socket."""
+        try:
+            message = proto.VerificationReportMessage.model_validate(payload)
+        except Exception:  # noqa: BLE001
+            self.stats["ws_rejected_measurement"] += 1
+            await self._close_measurement(session, "malformed verification report")
+            return False
+
+        submission = VerificationSubmission(
+            challenge_id=message.challenge_id,
+            nonce=message.nonce,
+            components=tuple(
+                ComponentReport(
+                    name=item.name,
+                    digest=item.digest,
+                    extension_id=item.extension_id,
+                    version=item.version,
+                    measurement_id=item.measurement_id,
+                    measured_at=item.measured_at,
+                    limitations=tuple(item.limitations),
+                    checks=tuple(item.checks),
+                )
+                for item in message.components
+            ),
+        )
+        anchor = resolve_trust_anchor(self.config.trust_policy)
+        attestation = SessionAttestation(
+            store=self.challenges,
+            anchor=anchor,
+            required_components=tuple(self.config.required_components),
+            freshness_seconds=self.config.measurement_freshness_seconds,
+        )
+        provenance = session.provenance
+        try:
+            evidence = attestation.accept(
+                submission,
+                session_id=session.session_id,
+                companion_id=session.extension_id or "",
+                hello_extension_id=session.extension_id or "",
+                hello_version=session.extension_version or "",
+                hello_digest=(provenance.package_sha256 if provenance else "") or "",
+            )
+        except AttestationRejected as exc:
+            self.stats["ws_rejected_measurement"] += 1
+            self.trust_registry.audit(
+                f"flow.trust.{exc.code}",
+                session_id=session.session_id,
+                challenge_id=message.challenge_id,
+            )
+            self.trust_registry.record(
+                session.session_id,
+                empty_decision(exc.code),
+            )
+            await self._close_measurement(session, exc.code)
+            return False
+
+        report = verify_provenance(
+            provenance,
+            policy=self.config.trust_policy,
+            allow_component_drift=self.config.allow_component_drift,
+        ) if provenance else None
+        extension = submission.component(COMPONENT_EXTENSION)
+        decision = aggregate_trust(
+            source_gate_status=self._source_gate_status(),
+            anchor=anchor,
+            provenance=report,
+            evidence=evidence,
+            session_id=session.session_id,
+            measured_extension_id=extension.extension_id if extension else "",
+            measured_version=extension.version if extension else "",
+            measured_digest=extension.digest if extension else "",
+        )
+        session.trust = self.trust_registry.record(session.session_id, decision)
+        self.last_trust = session.trust
+        logger.info(
+            "flow_bridge_measurement state=%s session=%s measured=%s",
+            decision.state,
+            session.session_id,
+            (decision.measured_digest or "-")[:16],
+        )
+        return True
+
+    def _source_gate_status(self) -> str:
+        """The upstream gate, read once per decision. Absent source is the norm."""
+        try:
+            from app.flow.source_gate import evaluate_source_gate
+
+            return evaluate_source_gate(os.getenv("FLOW_SOURCE_PACKAGE_PATH", "")).status
+        except Exception:  # noqa: BLE001 - a gate that cannot answer must not authorize
+            return "LICENSING_BLOCKED"
+
+    async def _close_measurement(self, session: ExtensionSession, reason: str) -> None:
+        try:
+            await session.websocket.close(
+                code=proto.WS_CLOSE_MEASUREMENT, reason=reason[:120]
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------- dispatch
     @property
@@ -792,6 +995,15 @@ class FlowBridge:
                 self.session and self.session.artifact_integrity_verified
             ),
             "trust_anchor": self.session.anchor_source if self.session else "none",
+            "trust": trust_status_payload(
+                policy_anchor=resolve_trust_anchor(self.config.trust_policy)
+                if self.config.trust_policy.has_anchor
+                else TrustAnchor(),
+                decision=self.session.trust if self.session else self.last_trust,
+                registry=self.trust_registry,
+                source_gate_status=self._source_gate_status(),
+                required_components=tuple(self.config.required_components),
+            ),
             "trust_policy": {
                 "anchor_configured": self.config.trust_policy.has_anchor,
                 "anchor_kind": (
@@ -868,7 +1080,20 @@ class FlowBridge:
     async def submit_generation(
         self, kind: str, request: proto.GenerationCommand, *, approval_binding: str
     ) -> FlowJob:
-        """Always refused in 3C.1: the flag is False and no route sets it."""
+        """Refused unless every §9 prerequisite holds — which today it never does."""
+        guard = evaluate_live_generation_guard(
+            live_generation_flag=bool(self.config.live_generation_enabled),
+            source_gate_status=self._source_gate_status(),
+            decision=self.current_trust(),
+            approval_binding=approval_binding,
+            budget_configured=True,
+            idempotency_enforced=True,
+        )
+        if not guard.allowed:
+            raise UntrustedArtifact(
+                "Live generation is blocked: " + ", ".join(guard.blockers),
+                details={"blockers": list(guard.blockers)},
+            )
         if not self.config.live_generation_enabled:
             raise LiveGenerationDisabled()
         return await self.coordinator.submit(
@@ -903,6 +1128,25 @@ def bridge_config_from_settings(settings: Any) -> BridgeConfig:
         export_max_bytes=settings.flow_export_max_bytes,
         live_generation_enabled=False,
         allow_component_drift=bool(getattr(settings, "flow_allow_component_drift", False)),
+        trusted_artifact_sha256=getattr(settings, "flow_trusted_artifact_sha256", ""),
+        trusted_release=getattr(settings, "flow_trusted_release", ""),
+        trusted_source_commit=getattr(settings, "flow_trusted_source_commit", ""),
+        release_manifest_path=getattr(settings, "flow_release_manifest_path", ""),
+        release_manifest_public_key=getattr(settings, "flow_release_manifest_public_key", ""),
+        require_installed_measurement=bool(
+            getattr(settings, "flow_require_installed_measurement", False)
+        ),
+        challenge_ttl_seconds=float(
+            getattr(settings, "flow_measurement_challenge_ttl_seconds", 120.0)
+        ),
+        measurement_freshness_seconds=float(
+            getattr(settings, "flow_measurement_freshness_seconds", 300.0)
+        ),
+        required_components=tuple(
+            item.strip()
+            for item in str(getattr(settings, "flow_required_components", "chrome_extension")).split(",")
+            if item.strip()
+        ) or ("chrome_extension",),
     )
 
 

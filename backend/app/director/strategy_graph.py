@@ -55,9 +55,16 @@ def _after_intake(state: StrategyWorkflowState) -> str:
 
 
 def _after_research_decision(state: StrategyWorkflowState) -> str:
+    """Route to a research round, or straight to judging the evidence we hold.
+
+    Skipping research must never skip *evaluation*: reusing existing findings is
+    a decision that has to be justified by the same evidence assessment a fresh
+    round receives, otherwise the workflow can approve a strategy on unreviewed
+    evidence.
+    """
     if state.get("status") in ("failed", "budget_exhausted", "cancelled"):
         return "fail"
-    return "run_research" if state.get("research_needed") else "generate_strategy"
+    return "run_research" if state.get("research_needed") else "evaluate_evidence"
 
 
 def _after_evaluation(state: StrategyWorkflowState) -> str:
@@ -146,7 +153,7 @@ def build_strategy_graph(nodes: StrategyNodes, checkpointer: Any = None):
     builder.add_edge("retrieve_brand_knowledge", "decide_research")
     builder.add_conditional_edges(
         "decide_research", _after_research_decision,
-        {"run_research": "run_research", "generate_strategy": "generate_strategy", "fail": "fail"},
+        {"run_research": "run_research", "evaluate_evidence": "evaluate_evidence", "fail": "fail"},
     )
     builder.add_edge("run_research", "evaluate_evidence")
     builder.add_conditional_edges(

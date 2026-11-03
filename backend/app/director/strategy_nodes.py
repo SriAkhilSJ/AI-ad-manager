@@ -484,8 +484,24 @@ class StrategyNodes:
         cited = [f for f in findings if f.source_url]
         categories = {f.category for f in findings}
 
-        provider_status = (state.get("findings_summary") or {}).get("provider_status") or ""
-        provider_name = (state.get("findings_summary") or {}).get("provider") or ""
+        # Reusing existing findings never runs a round, so there is no findings
+        # summary yet: describe the evidence we are actually judging.
+        summary = state.get("findings_summary") or {}
+        if not summary:
+            from app.research.base import research_status
+
+            provider_info = research_status(self.settings)
+            summary = {
+                "findings": total,
+                "sources": len(cited),
+                "coverage": sorted(categories),
+                "gaps": [c for c in RESEARCH_CATEGORIES if c not in categories],
+                "provider": provider_info.get("provider") or "",
+                "provider_status": provider_info.get("status") or "",
+                "reused": True,
+            }
+        provider_status = summary.get("provider_status") or ""
+        provider_name = summary.get("provider") or ""
         rounds = len(state.get("research_rounds") or [])
         max_iterations = int(state.get("max_iterations") or 4)
 
@@ -519,6 +535,7 @@ class StrategyNodes:
         )
 
         assessment = {
+            "reused_existing_findings": bool(summary.get("reused")),
             "total_findings": total,
             "verified_findings": len(verified),
             "cited_findings": len(cited),
@@ -548,6 +565,7 @@ class StrategyNodes:
             "limits": self._limits(state, iterations=iterations_after),
             "evidence_verdict": verdict,
             "evidence_assessment": assessment,
+            "findings_summary": summary,
             "needs_more_research": needs_more,
             "iteration": iterations_after,
             "trace": [

@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-11-03T05:41:20Z",
+  "generated_at": "2026-11-03T06:08:45Z",
   "base_url": "http://127.0.0.1:8000",
-  "passed": 14,
-  "total": 14,
+  "passed": 23,
+  "total": 23,
   "criteria": [
     {
       "criterion": "1. Backend starts",
       "passed": true,
-      "detail": "liveness 200 (uptime 24.1s); /system/status reachable pre-auth -> 200"
+      "detail": "liveness 200 (uptime 2.2s); /system/status reachable pre-auth -> 200"
     },
     {
       "criterion": "1b. /system/status reports every integration honestly",
@@ -32,22 +32,22 @@
     {
       "criterion": "5. Director initialises a stateful workflow",
       "passed": true,
-      "detail": "15 nodes, interrupt at human_approval; workflow wf_8c4114dc3184471c produced 3 drafts in 8 iterations and is awaiting approval"
+      "detail": "15 nodes, interrupt at human_approval; workflow wf_686770acf1034619 produced 3 drafts in 8 iterations and is awaiting approval"
     },
     {
       "criterion": "6. All six agents invocable through structured interfaces",
       "passed": true,
-      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run 1e542708\u2026, 3 trace events)"
+      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run b44baf7a\u2026, 3 trace events)"
     },
     {
       "criterion": "7. Workflow state persists across restarts",
       "passed": true,
-      "detail": "a fresh process reconstructed thread wf_8c4114dc3184471c: 23 checkpoints, identical plan and content ids"
+      "detail": "a fresh process reconstructed thread wf_686770acf1034619: 23 checkpoints, identical plan and content ids"
     },
     {
       "criterion": "8. Content create + immutable version history",
       "passed": true,
-      "detail": "content 86215150\u2026 now at v2 with distinct content hashes"
+      "detail": "content 9f15b707\u2026 now at v2 with distinct content hashes"
     },
     {
       "criterion": "9. Approval state machine + invalidation on edit",
@@ -62,17 +62,62 @@
     {
       "criterion": "11. Model usage and cost are recordable",
       "passed": true,
-      "detail": "usage ledger 0 -> 1600 tokens, $0.0000 -> $0.0042 across 1 provider row(s)"
+      "detail": "usage ledger 6400 -> 8000 tokens, $0.0168 -> $0.0210 across 1 provider row(s)"
     },
     {
       "criterion": "12. Automated test suite passes",
       "passed": true,
-      "detail": "352 tests, 0 failures, 0 errors"
+      "detail": "353 tests, 0 failures, 0 errors"
     },
     {
       "criterion": "13. Architecture documentation is complete",
       "passed": true,
       "detail": "5 architecture documents present (00-ARCHITECTURE-AUDIT.md:5952B, 01-IMPLEMENTATION-PLAN.md:8576B, 02-FILE-PLAN.md:9143B, 03-RISKS-AND-DEPENDENCIES.md:5786B, 04-ACCEPTANCE-EVIDENCE.md:11142B)"
+    },
+    {
+      "criterion": "14. Research jobs create and execute",
+      "passed": true,
+      "detail": "provider=deterministic status=succeeded findings=18 sources=10 gaps=1"
+    },
+    {
+      "criterion": "15. Findings carry source metadata",
+      "passed": true,
+      "detail": "18 findings, 10 sources, 4 verified (all cited), 5 uncited and unverified"
+    },
+    {
+      "criterion": "16. Phase 2 schema is migrated (not create_all)",
+      "passed": true,
+      "detail": "2 migrations cover 11 Phase 2 tables incl. the verified-source CHECK"
+    },
+    {
+      "criterion": "17. Strategy generation works",
+      "passed": true,
+      "detail": "strategy v1 DRAFT; 4 KPIs, 2 experiments, content_hash 52dafc28a5b3"
+    },
+    {
+      "criterion": "18. Versioning + approval invalidation",
+      "passed": true,
+      "detail": "approval bound to v1; edit created v2 and invalidated the approval (superseded by version 2)"
+    },
+    {
+      "criterion": "19. Director orchestrates agents and gates on approval",
+      "passed": true,
+      "detail": "workflow strat_4e0580caa5f3494f: 7 trace entries (reused 162 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
+    },
+    {
+      "criterion": "20. Usage, cost and budget enforcement",
+      "passed": true,
+      "detail": "zero-budget run spent $0.0000; estimate $0.0195 for a $0.06 budget; unverified pricing exposed for 2 model(s)"
+    },
+    {
+      "criterion": "21. Execution limits are enforced",
+      "passed": true,
+      "detail": "12 nodes, 4 loop bounds, limits=4 iterations (used 1)"
+    },
+    {
+      "criterion": "22. Phase 2 never publishes, sends or spends",
+      "passed": true,
+      "detail": "5 publish/execute/apply paths absent; execution-status scopes approval to planning; /system/status still reports publishing unavailable"
     }
   ]
 }

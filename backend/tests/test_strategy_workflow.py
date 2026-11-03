@@ -197,6 +197,31 @@ async def test_existing_evidence_can_skip_research(session, brand_row, runtime):
     assert state["research_rounds"] == []
     assert state["strategy_id"] is not None, "a strategy must still be produced"
 
+    # Skipping research must not skip judging the evidence that was reused:
+    # otherwise a strategy can be approved without anyone assessing its basis.
+    entries = [e["entry"] for e in state["trace"]]
+    assert "research_run" not in entries
+    assert "evidence_evaluated" in entries, "the reuse path bypassed evidence evaluation"
+    assert state["evidence_verdict"] in ("sufficient", "insufficient")
+    assert state["evidence_assessment"]["reused_existing_findings"] is True
+    assert state["findings_summary"]["reused"] is True
+    assert state["findings_summary"]["findings"] == 12
+
+
+async def test_research_decision_always_routes_through_evaluation():
+    """A routing contract: neither branch of the research decision may skip review."""
+    from app.director.strategy_graph import _after_research_decision
+
+    for needed in (True, False):
+        target = _after_research_decision({"status": "researching", "research_needed": needed})
+        assert target in ("run_research", "evaluate_evidence")
+    assert _after_research_decision({"status": "researching", "research_needed": True}) == (
+        "run_research"
+    )
+    assert _after_research_decision({"status": "researching", "research_needed": False}) == (
+        "evaluate_evidence"
+    )
+
 
 async def test_evidence_verdict_reflects_available_evidence(session, brand_row, runtime):
     result = await run_workflow(session, brand_row, runtime)

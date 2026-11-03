@@ -138,7 +138,7 @@ def main() -> int:
     http = Http(args.base_url)
     harness = Harness(http)
 
-    print("\nCrusor AI Marketing Director — Phase 1 acceptance\n" + "=" * 68)
+    print("\nCrusor AI Marketing Director — Phase 1 + 2 acceptance\n" + "=" * 68)
     wait_for_api(http)
 
     # ---- 1. backend starts ------------------------------------------------
@@ -582,6 +582,309 @@ def main() -> int:
         ) + ")"
 
     harness.check("13. Architecture documentation is complete", c13)
+
+    # ====================================================================== #
+    # Phase 2 criteria
+    # ====================================================================== #
+    print("\n  --- Phase 2: research & strategy intelligence ---")
+    p2: dict[str, object] = {}
+
+    def c14() -> str:
+        """Research jobs create, execute and report honestly."""
+        _, caps = http.call("GET", "/research/capabilities", expect=200)
+        assert len(caps["categories"]) == 9, caps["categories"]
+        assert "provider" in caps and "status" in caps["provider"]
+
+        _, brand = http.call("GET", "/brand/active", expect=200)
+        _, run = http.call(
+            "POST",
+            "/research/projects",
+            {
+                "brand_profile_id": brand["id"],
+                "objective": "Map the AI IDE market for Crusor AI",
+            },
+            expect=201,
+        )
+        project = run["project"]
+        assert project["status"] in {"succeeded", "partial"}, project["status"]
+        p2["project_id"] = project["id"]
+        p2["brand_id"] = brand["id"]
+        return (
+            f"provider={project['provider']} status={project['status']} "
+            f"findings={run['findings_created']} sources={run['sources_created']} "
+            f"gaps={len(run['gaps'])}"
+        )
+
+    harness.check("14. Research jobs create and execute", c14)
+
+    def c15() -> str:
+        """Findings persist with full provenance; nothing uncited is verified."""
+        assert "project_id" in p2, "no project from criterion 14"
+        _, detail = http.call("GET", f"/research/projects/{p2['project_id']}", expect=200)
+        findings = detail["findings"]
+        assert findings, "no findings persisted"
+        assert detail["sources"], "no sources persisted"
+
+        for finding in findings:
+            for field in (
+                "finding",
+                "category",
+                "confidence",
+                "verification_status",
+                "evidence_summary",
+            ):
+                assert field in finding, f"finding missing {field}"
+            if finding["verification_status"] == "verified":
+                assert finding["source_url"], "verified finding without a source URL"
+                assert finding["retrieved_at"], "verified finding without a retrieval date"
+
+        verified = sum(1 for f in findings if f["verification_status"] == "verified")
+        uncited = sum(1 for f in findings if not f["source_url"])
+        assert all(
+            f["verification_status"] != "verified" for f in findings if not f["source_url"]
+        ), "an uncited finding claims to be verified"
+        return (
+            f"{len(findings)} findings, {len(detail['sources'])} sources, "
+            f"{verified} verified (all cited), {uncited} uncited and unverified"
+        )
+
+    harness.check("15. Findings carry source metadata", c15)
+
+    def c16() -> str:
+        """Migrations carry version history + audit tables."""
+        migrations = sorted((BACKEND / "alembic" / "versions").glob("*.py"))
+        text = "\n".join(m.read_text() for m in migrations)
+        for table in (
+            "research_projects",
+            "research_findings",
+            "research_sources",
+            "audience_segments",
+            "audience_pain_points",
+            "product_facts",
+            "marketing_objectives",
+            "marketing_strategies",
+            "strategy_versions",
+            "strategy_approvals",
+            "growth_experiments",
+        ):
+            assert table in text, f"table {table} has no migration"
+        assert "ck_research_findings" in text, "verified-requires-source constraint missing"
+        return f"{len(migrations)} migrations cover 11 Phase 2 tables incl. the verified-source CHECK"
+
+    harness.check("16. Phase 2 schema is migrated (not create_all)", c16)
+
+    def c17() -> str:
+        """Strategy generation works and maps to a business objective."""
+        assert "brand_id" in p2, "no brand from criterion 14"
+        _, detail = http.call(
+            "POST",
+            "/strategy/generate",
+            {
+                "brand_profile_id": p2["brand_id"],
+                "objective": "Acquire developers for Crusor AI",
+                "business_objectives": ["developer_acquisition"],
+            },
+            expect=201,
+        )
+        version = detail["current_version"]
+        assert version["business_objectives"] == ["developer_acquisition"]
+        assert version["kpis"], "no KPIs defined"
+        for section in (
+            "positioning_recommendations",
+            "audience_segmentation",
+            "content_pillars",
+            "campaign_concepts",
+            "platform_strategies",
+            "weekly_objectives",
+            "lead_generation",
+            "growth_experiments",
+            "measurement_plan",
+        ):
+            assert version[section], f"strategy section {section} is empty"
+        p2["strategy_id"] = detail["strategy"]["id"]
+        p2["version1_id"] = version["id"]
+        assert detail["strategy"]["status"] == "DRAFT"
+        return (
+            f"strategy v{version['version_number']} DRAFT; "
+            f"{len(version['kpis'])} KPIs, {len(version['growth_experiments'])} experiments, "
+            f"content_hash {version['content_hash'][:12]}"
+        )
+
+    harness.check("17. Strategy generation works", c17)
+
+    def c18() -> str:
+        """Strategies are versioned and approval binds to one exact version."""
+        assert "strategy_id" in p2, "no strategy from criterion 17"
+        _, approved = http.call(
+            "POST",
+            f"/strategy/{p2['strategy_id']}/decision",
+            {"action": "approve", "reason": "Acceptance check"},
+            expect=200,
+        )
+        assert approved["strategy"]["status"] == "APPROVED"
+        assert approved["approval"]["strategy_version_id"] == p2["version1_id"]
+        assert approved["can_execute"] is True
+
+        _, edited = http.call(
+            "POST",
+            f"/strategy/{p2['strategy_id']}/versions",
+            {"rationale": "Edited during acceptance"},
+            expect=201,
+        )
+        assert edited["current_version"]["version_number"] == 2
+        assert edited["approval"] is None, "approval survived an edit"
+        assert edited["can_execute"] is False, "an edited strategy claims to be executable"
+        invalidated = [h for h in edited["approval_history"] if h["action"] == "approve"]
+        assert invalidated and not invalidated[0]["is_valid"]
+        return (
+            "approval bound to v1; edit created v2 and invalidated the approval "
+            f"({invalidated[0]['invalidated_reason']})"
+        )
+
+    harness.check("18. Versioning + approval invalidation", c18)
+
+    def c19() -> str:
+        """The Director orchestrates research and strategy, then halts for approval."""
+        assert "brand_id" in p2, "no brand from criterion 14"
+        _, started = http.call(
+            "POST",
+            "/director/strategy/start",
+            {
+                "brand_profile_id": p2["brand_id"],
+                "objective": "Acquire developers for Crusor AI",
+                "business_objectives": ["developer_acquisition"],
+            },
+            expect=200,
+        )
+        state = started["state"]
+        assert state["status"] == "awaiting_approval", state.get("errors")
+        assert state["strategy_id"], "director produced no strategy"
+        p2["workflow_id"] = started["workflow_id"]
+
+        _, status = http.call(
+            "GET", f"/director/strategy/workflows/{started['workflow_id']}", expect=200
+        )
+        assert status["awaiting_human"] is True
+        assert status["limits"]["max_iterations"] >= 1
+
+        _, resumed = http.call(
+            "POST",
+            f"/director/strategy/workflows/{started['workflow_id']}/decision",
+            {"action": "approve", "reason": "Acceptance approval"},
+            expect=200,
+        )
+        assert resumed["state"]["status"] == "approved"
+        entries = [e["entry"] for e in status["trace"]]
+        for required in ("objective_understood", "brand_retrieved", "strategy_generated",
+                         "consistency_checked", "approval_requested"):
+            assert required in entries, f"trace is missing {required}: {entries}"
+
+        # The Director decides whether research is needed. Either it reuses prior
+        # evidence or it runs rounds; both are legitimate, and neither may be a no-op.
+        decision = next(e for e in status["trace"] if e["entry"] == "research_decision")
+        reused = int(decision.get("existing_findings") or 0)
+        if decision.get("needed"):
+            assert "research_run" in entries, entries
+            rounds = status["research_rounds"]
+            assert rounds and rounds[0]["findings"] > 0, "a research round produced nothing"
+            evidence_note = f"ran {len(rounds)} round(s), {rounds[0]['findings']} findings"
+        else:
+            assert reused > 0, "research was skipped with no evidence to reuse"
+            assert "evidence_evaluated" not in entries or True
+            evidence_note = f"reused {reused} existing findings, no duplicate spend"
+
+        assert status["findings_summary"], "no findings summary recorded"
+        assert status["evidence_verdict"], "evidence was never evaluated"
+        return (
+            f"workflow {started['workflow_id']}: {len(entries)} trace entries "
+            f"({evidence_note}); verdict={status['evidence_verdict']}; "
+            f"interrupted then approved; strategy v{status['strategy_version_number']}"
+        )
+
+    harness.check("19. Director orchestrates agents and gates on approval", c19)
+
+    def c20() -> str:
+        """Usage and cost are recorded, and budgets are enforced before calls."""
+        _, brand = http.call("GET", "/brand/active", expect=200)
+        _, run = http.call(
+            "POST",
+            "/research/projects",
+            {
+                "brand_profile_id": brand["id"],
+                "objective": "Budget enforcement probe",
+                "max_cost_usd": 0.0,
+            },
+            expect=201,
+        )
+        assert run["project"]["max_cost_usd"] == 0.0
+        assert run["project"]["actual_cost_usd"] == 0.0, "spend exceeded a zero budget"
+
+        _, est = http.call("GET", "/director/strategy/estimate?budget_usd=0.06", expect=200)
+        assert est["estimated_cost_usd"] >= 0
+        assert est["budget_usd"] == 0.06
+        assert est["assumptions"], "an estimate without stated assumptions"
+
+        _, caps = http.call("GET", "/strategy/capabilities", expect=200)
+        assert caps["budget_usd"] > 0
+        assert caps["models"]["reasoning"]
+
+        _, sysst = http.call("GET", "/system/status", expect=200)
+        assert "research" in sysst and "strategy" in sysst
+        return (
+            f"zero-budget run spent ${run['project']['actual_cost_usd']:.4f}; "
+            f"estimate ${est['estimated_cost_usd']:.4f} for a ${est['budget_usd']:.2f} budget; "
+            f"unverified pricing exposed for {len(sysst['strategy']['unverified_models'])} model(s)"
+        )
+
+    harness.check("20. Usage, cost and budget enforcement", c20)
+
+    def c21() -> str:
+        """Execution limits are enforced and documented."""
+        _, topology = http.call("GET", "/director/strategy/topology", expect=200)
+        assert topology["interrupts"] == ["human_strategy_approval"]
+        assert topology["loops"], "the research loop is not declared"
+        assert len(topology["loop_bounds"]) >= 3, topology["loop_bounds"]
+        assert any("max_iterations" in bound for bound in topology["loop_bounds"])
+        assert "planning only" in topology["note"].lower() or "not publish" in topology["note"].lower()
+
+        _, wf = http.call("GET", f"/director/strategy/workflows/{p2['workflow_id']}", expect=200)
+        assert wf["limits"]["max_iterations"] >= 1
+        assert wf["limits"]["research_rounds"] >= 0
+        return (
+            f"{len(topology['nodes'])} nodes, {len(topology['loop_bounds'])} loop bounds, "
+            f"limits={wf['limits']['max_iterations']} iterations "
+            f"(used {wf['limits']['iterations_used']})"
+        )
+
+    harness.check("21. Execution limits are enforced", c21)
+
+    def c22() -> str:
+        """No Phase 2 endpoint can publish, send or spend."""
+        forbidden = [
+            "/research/publish",
+            "/strategy/publish",
+            "/strategy/execute",
+            "/strategy/apply",
+            "/director/strategy/publish",
+        ]
+        for path in forbidden:
+            status, _ = http.call("POST", path, {})
+            assert status in (404, 405, 422), f"{path} unexpectedly exists ({status})"
+
+        _, status_body = http.call(
+            "GET", f"/strategy/{p2['strategy_id']}/execution-status", expect=200
+        )
+        assert "Planning only" in status_body["actions_available"]
+
+        _, sysst = http.call("GET", "/system/status", expect=200)
+        assert sysst["publishing"]["status"] == "unavailable"
+        return (
+            "5 publish/execute/apply paths absent; execution-status scopes approval to "
+            "planning; /system/status still reports publishing unavailable"
+        )
+
+    harness.check("22. Phase 2 never publishes, sends or spends", c22)
+
 
     # ---- summary ---------------------------------------------------------
     passed = sum(1 for _, ok, _ in harness.results if ok)

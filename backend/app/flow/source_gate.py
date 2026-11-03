@@ -1,29 +1,36 @@
-"""Upstream source and licensing gate (Phase 3C.2 §2).
+"""Upstream source and licensing gate (Phase 3C.2 §2, corrected in 3C.2.1).
 
-Phase 3C.2 asks for U1–U7 to be fixed *in the extension*. Before any line of
-third-party code may be modified, copied, or forked, four things must exist:
+The gate answers one question — *may Crusor modify and redistribute this
+upstream package?* — and it must never answer "yes" because a file with a
+particular name exists. Phase 3C.2 did exactly that: any file called ``LICENSE``,
+including an empty one, set ``AUTHORIZED``.
 
-1. identifiable upstream source;
-2. an exact version or commit;
-3. a licence file, or explicit written permission;
-4. permission to modify **and** to use the result in this integration.
-
-This module answers that question mechanically, from the filesystem, so the answer
-cannot drift from reality in a document. It never copies, moves, or reads source
-into this repository: it reports presence, licence evidence, and a status.
-
-Three outcomes:
+Phase 3C.2.1 splits the answer into five states so that "there is licence-shaped
+text here" and "a named human reviewed this package and concluded we may modify
+it" can never be confused again:
 
 ``SOURCE_ABSENT``
-    No package at the configured path. Everything upstream is blocked.
+    No package at the configured path. Nothing upstream can be done at all.
 ``LICENSING_BLOCKED``
-    A package exists but carries no licence and no authorisation file. Crusor must
-    not modify or redistribute it, so the remediation work stays blocked.
+    A package exists but contains no substantive licence or permission document
+    (empty and whitespace-only files are not evidence). Cannot proceed.
+``LICENSE_EVIDENCE_PRESENT``
+    Substantive licence-shaped documents exist, but no human attestation has been
+    supplied. Presence of a document is evidence *for a reviewer*, not permission.
+``AUTHORIZATION_REVIEW_REQUIRED``
+    An attestation exists but is incomplete, internally inconsistent, stored
+    inside the package it describes, or bound to a different package digest.
 ``AUTHORIZED``
-    A package with licence evidence exists. The audit tool may run its scans and a
-    human may begin the U1–U7 remediation on that copy.
+    A complete attestation, written by a named reviewer, whose recorded package
+    digest equals the digest of the package actually present.
 
-Default configuration is ``SOURCE_ABSENT``: no path, no licence, no permission.
+Only ``AUTHORIZED`` sets ``authorized_to_modify`` / ``can_vendor_source`` /
+``upstream_remediation_allowed``. Every other state leaves all three ``False``.
+
+Nothing here interprets a licence. The module records what evidence exists
+(name, size, SHA-256), computes the package's tree digest, and checks that a
+human's attestation is complete and refers to *these* bytes. See
+:mod:`app.flow.authorization`.
 """
 
 from __future__ import annotations
@@ -33,11 +40,31 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.flow.authorization import (
+    AuthorizationAttestation,
+    EvidenceFile,
+    load_attestation,
+    package_tree_digest,
+    scan_evidence,
+)
 from app.flow.provenance import LICENSE_EVIDENCE, REQUIRED_UPSTREAM_FILES
 
 STATUS_SOURCE_ABSENT = "SOURCE_ABSENT"
 STATUS_LICENSING_BLOCKED = "LICENSING_BLOCKED"
+STATUS_LICENSE_EVIDENCE_PRESENT = "LICENSE_EVIDENCE_PRESENT"
+STATUS_AUTHORIZATION_REVIEW_REQUIRED = "AUTHORIZATION_REVIEW_REQUIRED"
 STATUS_AUTHORIZED = "AUTHORIZED"
+
+#: States in which the scanner may read the package. Reading is not modifying;
+#: findings are what a reviewer needs in order to decide.
+READABLE_STATES = (
+    STATUS_LICENSE_EVIDENCE_PRESENT,
+    STATUS_AUTHORIZATION_REVIEW_REQUIRED,
+    STATUS_AUTHORIZED,
+)
+
+#: States in which third-party source may be edited, forked or vendored.
+AUTHORIZING_STATES = (STATUS_AUTHORIZED,)
 
 
 def _remediation_requirements() -> list[dict[str, str]]:
@@ -120,38 +147,78 @@ class SourceGate:
     missing_files: tuple[str, ...] = ()
     reason: str = ""
     remediation: tuple[dict[str, str], ...] = field(default_factory=tuple)
+    package_digest: str = ""
+    evidence: tuple[EvidenceFile, ...] = ()
+    attestation: AuthorizationAttestation = field(default_factory=AuthorizationAttestation)
 
     @property
     def authorized(self) -> bool:
-        return self.status == STATUS_AUTHORIZED
+        return self.status in AUTHORIZING_STATES
+
+    @property
+    def readable(self) -> bool:
+        return self.status in READABLE_STATES
 
     def as_dict(self) -> dict[str, Any]:
+        substantive = [item for item in self.evidence if item.substantive]
         return {
             "status": self.status,
             "package_path": self.package_path,
             "source_present": self.present,
+            "package_digest_algorithm": "sha256-tree-v1",
+            "package_digest": self.package_digest,
             "license_files": list(self.license_files),
             "authorization_files": list(self.authorization_files),
+            "license_evidence": [item.as_dict() for item in self.evidence],
+            "substantive_license_evidence": [item.name for item in substantive],
             "missing_files": list(self.missing_files),
             "authorized_to_modify": self.authorized,
             "can_vendor_source": self.authorized,
             "upstream_remediation_allowed": self.authorized,
+            "scan_permitted": self.readable,
+            "evidence_alone_authorizes": False,
+            "human_review_required": self.status != STATUS_AUTHORIZED,
+            "attestation": self.attestation.as_dict(),
             "reason": self.reason,
             "required_files": list(REQUIRED_UPSTREAM_FILES),
             "license_evidence_searched": list(LICENSE_EVIDENCE),
+            "authorization_requirements": [
+                "an attestation stored outside the package",
+                "upstream project URL and exact release tag or commit",
+                "the package tree digest the reviewer reviewed",
+                "the licence name, evidence file and that file's SHA-256",
+                "explicit modification and redistribution permission",
+                "reviewer identity, review timestamp and evidence reference",
+            ],
             "remediation_requirements": list(self.remediation),
         }
 
 
-def evaluate_source_gate(package_path: str | Path | None = None) -> SourceGate:
+def _blocked(
+    status: str, *, path: str, present: bool, reason: str, remediation: tuple[dict[str, str], ...]
+) -> SourceGate:
+    return SourceGate(
+        status=status,
+        package_path=path,
+        present=present,
+        reason=reason,
+        remediation=remediation,
+    )
+
+
+def evaluate_source_gate(
+    package_path: str | Path | None = None,
+    *,
+    attestation_path: str | Path | None = None,
+) -> SourceGate:
     """Decide, from the filesystem alone, whether upstream work is permitted."""
     remediation = tuple(_remediation_requirements())
     configured = str(package_path or os.getenv("FLOW_SOURCE_PACKAGE_PATH", "") or "").strip()
 
     if not configured:
-        return SourceGate(
-            status=STATUS_SOURCE_ABSENT,
-            package_path="",
+        return _blocked(
+            STATUS_SOURCE_ABSENT,
+            path="",
             present=False,
             reason=(
                 "No upstream package is configured or present. The DeepX Flow Connector "
@@ -172,18 +239,81 @@ def evaluate_source_gate(package_path: str | Path | None = None) -> SourceGate:
             remediation=remediation,
         )
 
-    licences = tuple(name for name in LICENSE_EVIDENCE if (root / name).is_file())
+    evidence = scan_evidence(root, LICENSE_EVIDENCE)
+    substantive = tuple(item for item in evidence if item.substantive)
     missing = tuple(name for name in REQUIRED_UPSTREAM_FILES if not (root / name).is_file())
-    if not licences:
+    digest = package_tree_digest(root)
+    licences = tuple(item.name for item in evidence)
+
+    if not substantive:
+        detail = (
+            "the licence files present are empty or whitespace-only"
+            if evidence
+            else "no licence and no authorisation document"
+        )
         return SourceGate(
             status=STATUS_LICENSING_BLOCKED,
             package_path=str(root),
             present=True,
+            license_files=licences,
             missing_files=missing,
+            package_digest=digest,
+            evidence=evidence,
             reason=(
-                "A package is present but carries no licence and no authorisation "
-                "document, so Crusor may not modify, fork, or redistribute it. Obtain a "
-                "licence or explicit written permission before touching the source."
+                f"A package is present but {detail}, so Crusor may not modify, fork or "
+                "redistribute it. File presence alone never authorizes anything; supply "
+                "a licence or written permission and a human-reviewed attestation."
+            ),
+            remediation=remediation,
+        )
+
+    attestation = load_attestation(
+        attestation_path or os.getenv("FLOW_AUTHORIZATION_ATTESTATION_PATH", ""),
+        package_root=root,
+        observed_digest=digest,
+        evidence=evidence,
+    )
+    authorization_files = tuple(
+        name for name in ("AUTHORIZATION.md", "PERMISSION.md") if (root / name).is_file()
+    )
+
+    if not attestation.present:
+        return SourceGate(
+            status=STATUS_LICENSE_EVIDENCE_PRESENT,
+            package_path=str(root),
+            present=True,
+            license_files=licences,
+            authorization_files=authorization_files,
+            missing_files=missing,
+            package_digest=digest,
+            evidence=evidence,
+            attestation=attestation,
+            reason=(
+                "Licence-shaped documents exist in the package, but no human-reviewed "
+                "authorization attestation was supplied. Evidence is not permission: "
+                "set FLOW_AUTHORIZATION_ATTESTATION_PATH to a reviewed attestation "
+                "stored outside the package."
+            ),
+            remediation=remediation,
+        )
+
+    if not attestation.authorized:
+        problems = ", ".join(attestation.problems) or "attestation incomplete"
+        return SourceGate(
+            status=STATUS_AUTHORIZATION_REVIEW_REQUIRED,
+            package_path=str(root),
+            present=True,
+            license_files=licences,
+            authorization_files=authorization_files,
+            missing_files=missing,
+            package_digest=digest,
+            evidence=evidence,
+            attestation=attestation,
+            reason=(
+                f"An authorization attestation is present but does not authorize this "
+                f"package ({problems}). A reviewer must confirm the rights, the exact "
+                f"release and the package digest {digest[:16]}... before upstream source "
+                "may be touched."
             ),
             remediation=remediation,
         )
@@ -193,11 +323,23 @@ def evaluate_source_gate(package_path: str | Path | None = None) -> SourceGate:
         package_path=str(root),
         present=True,
         license_files=licences,
+        authorization_files=authorization_files,
         missing_files=missing,
-        reason="Licence evidence found; upstream remediation is permitted on this copy.",
+        package_digest=digest,
+        evidence=evidence,
+        attestation=attestation,
+        reason=(
+            "A human-reviewed attestation is bound to this package's digest and records "
+            f"permission to modify and redistribute ({attestation.licence_name}); "
+            f"reviewed by {attestation.reviewer} at {attestation.reviewed_at}."
+        ),
         remediation=remediation,
     )
 
 
-def source_gate_payload(package_path: str | Path | None = None) -> dict[str, Any]:
-    return evaluate_source_gate(package_path).as_dict()
+def source_gate_payload(
+    package_path: str | Path | None = None,
+    *,
+    attestation_path: str | Path | None = None,
+) -> dict[str, Any]:
+    return evaluate_source_gate(package_path, attestation_path=attestation_path).as_dict()

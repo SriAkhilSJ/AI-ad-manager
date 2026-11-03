@@ -50,6 +50,7 @@ from app.flow.coordinator import (
 from app.flow.provenance import (
     ExtensionProvenance,
     ProvenanceRejected,
+    TrustPolicy,
     UnsupportedProtocol,
     provenance_from_hello,
     verify_provenance,
@@ -57,6 +58,7 @@ from app.flow.provenance import (
 from app.flow.security import generate_pairing_id, generate_pairing_secret
 from app.flow.source_gate import (
     STATUS_AUTHORIZED,
+    STATUS_LICENSE_EVIDENCE_PRESENT,
     STATUS_LICENSING_BLOCKED,
     STATUS_SOURCE_ABSENT,
     evaluate_source_gate,
@@ -64,6 +66,10 @@ from app.flow.source_gate import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXT_ID = "abcdefghijklmnopabcdefghijklmnop"
+#: Phase 3C.2.1: trust needs an anchor Crusor already holds, so the fixtures pin a
+#: digest the HELLO must match. A digest the extension reports about itself is
+#: never used as its own anchor.
+HELLO_DIGEST = "a" * 64
 FLOW_API = "/api/v1/flow"
 CHUNK = 8 * 1024 * 1024
 
@@ -84,7 +90,7 @@ def _hello(**overrides: Any) -> dict[str, Any]:
         "mcp_version": "1.3.0",
         "source_commit": "0343884",
         "build_id": "build-2026-11-03",
-        "package_sha256": "",
+        "package_sha256": HELLO_DIGEST,
         "flow_tab_present": True,
     }
     payload.update(overrides)
@@ -100,6 +106,7 @@ def _provenance(**overrides: Any) -> ExtensionProvenance:
         "mcp_version": "1.3.0",
         "source_commit": "0343884",
         "build_id": "build-2026-11-03",
+        "package_sha256": HELLO_DIGEST,
     }
     base.update(overrides)
     return ExtensionProvenance(**base)
@@ -112,13 +119,33 @@ def test_supported_protocol_is_exactly_one_and_declared():
     assert proto.SUPPORTED_PROTOCOLS == (proto.PROTOCOL_VERSION,)
 
 
-def test_a_consistent_package_is_trusted():
+def test_a_consistent_package_is_well_formed_but_not_trusted():
+    """Phase 3C.2.1: syntax and self-consistency are not trust.
+
+    Nothing here has been compared against an expectation Crusor holds, so the
+    report must say UNVERIFIED even though every field is well-formed.
+    """
     report = verify_provenance(_provenance())
-    assert report.trusted is True
-    assert report.provenance.extension_version == "1.3.0"
+    assert report.claims_well_formed is True
+    assert report.components_consistent is True
+    assert report.artifact_integrity_verified is False
+    assert report.trusted is False
+    assert report.trust_state == "UNVERIFIED"
+    assert any("artifact_integrity_unverified" in warning for warning in report.warnings)
     assert report.provenance.release_line == "1.3"
     assert "extension_matches_service_worker" in report.checks
     assert len(report.provenance.fingerprint()) == 64
+
+
+def test_a_pinned_digest_makes_the_same_package_trusted():
+    report = verify_provenance(
+        _provenance(),
+        policy=TrustPolicy(trusted_artifact_sha256=HELLO_DIGEST, trusted_release="1.3.0"),
+    )
+    assert report.artifact_integrity_verified is True
+    assert report.trusted is True
+    assert report.trust_state == "VERIFIED"
+    assert "artifact_digest_matches_trusted_anchor" in report.checks
 
 
 def test_an_unsupported_protocol_is_refused():
@@ -180,7 +207,9 @@ def test_provenance_is_extracted_from_the_hello_message_not_trusted_blindly():
     hello = proto.HelloMessage.model_validate(_hello())
     provenance = provenance_from_hello(hello)
     assert provenance.source_commit == "0343884"
-    assert verify_provenance(provenance).trusted is True
+    # Self-reported fields are extracted, and extract them is all they are: with no
+    # independent anchor the report stays UNVERIFIED.
+    assert verify_provenance(provenance).trusted is False
 
     with pytest.raises(Exception):
         proto.HelloMessage.model_validate(_hello(protocol="flow.bridge.v9"))
@@ -206,6 +235,8 @@ async def bridge(pairing: dict[str, str]):  # type: ignore[no-untyped-def]
             handshake_timeout=2.0,
             request_timeout=5.0,
             command_timeout=3.0,
+            trusted_artifact_sha256=HELLO_DIGEST,
+            trusted_release="1.3.0",
         )
     )
     await instance.start()
@@ -238,6 +269,13 @@ async def test_a_proven_handshake_is_accepted_and_reported(bridge: FlowBridge, p
         ack = json.loads(await asyncio.wait_for(ws.recv(), 3))
         assert ack["type"] == "hello_ack"
         assert ack["provenance_trusted"] is True
+        assert ack["provenance_state"] == "VERIFIED"
+        assert ack["trust_anchor"] == "pinned_digest"
+        # Three independent facts, each reported as itself: the ack must not imply
+        # an integrity check by reusing a broader boolean for a narrower name.
+        assert ack["claims_well_formed"] is True
+        assert ack["components_consistent"] is True
+        assert ack["artifact_integrity_verified"] is True
         assert ack["provenance"]["extension_version"] == "1.3.0"
         assert ack["provenance"]["service_worker_version"] == "1.3.0"
         assert ack["provenance"]["source_commit"] == "0343884"
@@ -927,11 +965,18 @@ def test_a_package_without_a_licence_is_blocked_even_though_it_exists(tmp_path):
     assert "no licence" in gate.reason.lower()
 
 
-def test_licence_evidence_opens_the_gate(tmp_path):
-    (tmp_path / "LICENSE").write_text("MIT", encoding="utf-8")
+def test_licence_evidence_moves_the_gate_but_never_authorizes_it(tmp_path):
+    """Phase 3C.2.1: a file called LICENSE is evidence for a reviewer, not consent."""
+    (tmp_path / "LICENSE").write_text(
+        "MIT License\n\nPermission is hereby granted, free of charge, to any person.",
+        encoding="utf-8",
+    )
     gate = evaluate_source_gate(tmp_path)
-    assert gate.status == STATUS_AUTHORIZED
-    assert gate.authorized is True
+    assert gate.status == STATUS_LICENSE_EVIDENCE_PRESENT
+    assert gate.authorized is False
+    assert gate.as_dict()["authorized_to_modify"] is False
+    assert gate.as_dict()["can_vendor_source"] is False
+    assert gate.as_dict()["evidence_alone_authorizes"] is False
     assert "LICENSE" in gate.license_files
 
 
@@ -987,10 +1032,14 @@ def test_the_scanner_refuses_an_unlicensed_package(tmp_path):
     assert report["scans_run"] == []
 
 
-def test_the_scanner_finds_the_audited_defects_in_a_licensed_copy(tmp_path):
+def test_the_scanner_finds_the_audited_defects_without_implying_authorization(tmp_path):
     package = tmp_path / "ext"
     (package / "mcp-server" / "src").mkdir(parents=True)
-    (package / "LICENSE").write_text("MIT", encoding="utf-8")
+    (package / "LICENSE").write_text(
+        "MIT License\n\nPermission is hereby granted, free of charge, to any person "
+        "obtaining a copy of this software.",
+        encoding="utf-8",
+    )
     (package / "manifest.json").write_text(
         json.dumps(
             {
@@ -1032,9 +1081,11 @@ def test_the_scanner_finds_the_audited_defects_in_a_licensed_copy(tmp_path):
     (package / "README.md").write_text("DeepX Flow Connector v1.2.0\n", encoding="utf-8")
 
     completed = _run_audit("--package", str(package))
-    assert completed.returncode == 1, completed.stderr[-800:]
+    # Exit 2 says exactly what is true: scanned, and still not authorized to modify.
+    assert completed.returncode == 2, completed.stderr[-800:]
     report = json.loads(completed.stdout)
-    assert report["status"] == STATUS_AUTHORIZED
+    assert report["status"] == STATUS_LICENSE_EVIDENCE_PRESENT
+    assert report["authorized"] is False
     scans = {finding["scan"] for finding in report["findings"]}
     assert {"S1", "S2", "S3", "S4", "S6", "S8", "S9", "S10", "S11", "S12", "S13", "S14"} <= scans
     assert report["versions"]["consistent"] is False

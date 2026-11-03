@@ -39,6 +39,7 @@ from app.core.errors import IntegrationUnavailableError, NotFoundError, Validati
 from app.creative.media import inspect_media
 from app.flow import protocol as proto
 from app.flow.security import constant_time_equals, secret_fingerprint
+from app.flow.provenance import TrustPolicy
 from app.flow.source_gate import source_gate_payload
 from app.models.content import ContentItem
 from app.models.creative import CreativeAsset, CreativeKind
@@ -385,10 +386,26 @@ class FlowAssetExportService:
         return ticket, token
 
     async def _usable_ticket(
-        self, token: str, companion_id: str, *, incoming_bytes: int = 0
+        self,
+        token: str,
+        companion_id: str,
+        *,
+        incoming_bytes: int = 0,
+        expected_ticket_id: uuid.UUID | str | None = None,
     ) -> tuple[FlowAssetExport, Any]:
-        """Load a ticket and enforce single-use, TTL, owner and size before bytes land."""
+        """Load a ticket and enforce identity, single-use, TTL, owner and size.
+
+        ``expected_ticket_id`` is the ticket named in the request URL. The token is
+        resolved to *its* ticket first, and identity is compared **before** any
+        mutation: no status change, no staging object, no audit row. Phase 3C.2
+        compared after ``accept_chunk`` had already written to the *other* ticket,
+        which let a token for ticket B mutate ticket A's upload by URL alone.
+        """
         ticket = await self._ticket_for_token(token)
+        if expected_ticket_id is not None and str(ticket.id) != str(expected_ticket_id):
+            # Deliberately identical to a token that does not exist: telling the
+            # caller *which* ticket their token belongs to would be an oracle.
+            raise ValidationProblem("This export token does not belong to that ticket.")
         now = _now()
 
         if ticket.status != "pending":
@@ -417,9 +434,15 @@ class FlowAssetExportService:
         data: bytes,
         companion_id: str,
         declared_content_type: str = "",
+        expected_ticket_id: uuid.UUID | str | None = None,
         actor_id: uuid.UUID | None = None,
     ) -> tuple[FlowAssetExport, CreativeAsset]:
-        ticket, now = await self._usable_ticket(token, companion_id, incoming_bytes=len(data))
+        ticket, now = await self._usable_ticket(
+            token,
+            companion_id,
+            incoming_bytes=len(data),
+            expected_ticket_id=expected_ticket_id,
+        )
         if ticket.upload_mode == "chunked" and int(ticket.chunks_received or 0):
             raise ValidationProblem(
                 "This ticket is receiving a chunked upload; finish it with chunks."
@@ -442,6 +465,7 @@ class FlowAssetExportService:
         chunk_sha256: str,
         data: bytes,
         companion_id: str,
+        expected_ticket_id: uuid.UUID | str | None = None,
         actor_id: uuid.UUID | None = None,
         max_chunk_bytes: int | None = None,
         max_chunks: int | None = None,
@@ -467,7 +491,12 @@ class FlowAssetExportService:
         if not re.fullmatch(r"[0-9a-f]{64}", (chunk_sha256 or "").lower()):
             raise ValidationProblem("X-Chunk-Sha256 must be a lowercase SHA-256.")
 
-        ticket, now = await self._usable_ticket(token, companion_id, incoming_bytes=len(data))
+        ticket, now = await self._usable_ticket(
+            token,
+            companion_id,
+            incoming_bytes=len(data),
+            expected_ticket_id=expected_ticket_id,
+        )
         if ticket.upload_mode == "single" and int(ticket.chunks_received or 0) == 0:
             if ticket.status != "pending":
                 raise ValidationProblem("This export ticket has already been used.")
@@ -737,9 +766,10 @@ def flow_status_payload(
     settings: Settings, gateway_status: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """The honest status block used by ``/flow/status`` and ``/system/status``."""
+    trust_policy = TrustPolicy.from_settings(settings)
     return {
         "integration": "google_flow_connector",
-        "phase": "3C.1",
+        "phase": "3C.2.1",
         "available": False,
         "enabled": False,
         "live_generation_enabled": bool(settings.flow_live_generation_enabled),
@@ -783,15 +813,27 @@ def flow_status_payload(
             },
         },
         "companion": gateway_status or {"configured": False, "sessions": []},
-        "source_gate": source_gate_payload(getattr(settings, "flow_source_package_path", "")),
+        "source_gate": source_gate_payload(
+            getattr(settings, "flow_source_package_path", ""),
+            attestation_path=getattr(settings, "flow_authorization_attestation_path", ""),
+        ),
         "protocol": {
             "supported": list(proto.SUPPORTED_PROTOCOLS),
+            "trust_semantics": {
+                "claims_well_formed": "syntax only",
+                "components_consistent": "package agrees with itself",
+                "artifact_integrity_verified": "installed bytes match a pinned digest "
+                "or an Ed25519-signed release manifest",
+                "provenance_trusted": "all three, never fewer",
+                "unverified_state": "UNVERIFIED",
+            },
             "current": proto.PROTOCOL_VERSION,
             "requires_provenance": True,
             "required_hello_fields": list(proto.REQUIRED_PROVENANCE_FIELDS),
             "allow_component_drift": bool(
                 getattr(settings, "flow_allow_component_drift", False)
             ),
+            "trust_anchor": trust_policy.as_dict(),
             "close_codes": {
                 "provenance": proto.WS_CLOSE_PROVENANCE,
                 "unsupported_protocol": proto.WS_CLOSE_PROTOCOL,

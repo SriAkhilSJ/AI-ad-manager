@@ -1,5 +1,13 @@
 # Phase 3C.2 — DeepX Extension Remediation & Secure Flow Integration
 
+> **Superseded in three places by [`docs/15`](15-PHASE3C21-TRUST-BOUNDARY-REVIEW.md)
+> (Phase 3C.2.1).** The licensing gate now distinguishes five states and never authorizes on
+> file presence; provenance separates well-formedness, self-consistency, artifact integrity
+> and trust, and requires an independently configured anchor; and export-ticket identity is
+> enforced inside the service before any mutation. The scanner's exit contract is now
+> `0/1/2/3/4`, where `2` means "scanned, still not authorized". Everything else below still
+> describes the current system; the verdict remains **NO-GO**.
+
 **Milestone:** Phase 3C.2 (follows Phase 3C.1 `0343884`)
 **Baseline:** `0343884` — 712 backend tests, acceptance 54/54, live Flow generation disabled
 **Verdict:** **NO-GO.** The DeepX Flow Connector source package was not supplied to this

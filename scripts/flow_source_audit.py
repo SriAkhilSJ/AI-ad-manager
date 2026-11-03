@@ -18,7 +18,11 @@ Exit codes:
 
 * ``0`` — authorized and scanned, no findings;
 * ``1`` — authorized and scanned, findings present;
-* ``3`` — blocked: no source, or no licence/authorisation (the current state);
+* ``2`` — scanned, but the package is **not** authorized for modification: licence
+  evidence exists without a human-reviewed attestation, or the attestation is
+  incomplete or bound to different bytes. Findings are evidence for a reviewer;
+  they never imply permission to edit (Phase 3C.2.1);
+* ``3`` — blocked: no source, or nothing substantive to read (the current state);
 * ``4`` — the package exists but is missing required files.
 """
 
@@ -211,7 +215,9 @@ def build_report(package_path: str | None) -> tuple[Report, int]:
         ],
     )
 
-    if gate.status in {STATUS_SOURCE_ABSENT, STATUS_LICENSING_BLOCKED}:
+    if not gate.readable:
+        # SOURCE_ABSENT / LICENSING_BLOCKED: reading is not permitted either, because
+        # there is nothing substantive to read and a scan would imply progress.
         report.scans_run = []
         return report, 3
 
@@ -224,6 +230,10 @@ def build_report(package_path: str | None) -> tuple[Report, int]:
     report.versions = _component_versions(root)
     report.findings = scan_package(root)
     report.scans_run = [scan[0] for scan in SCANS]
+    if not gate.authorized:
+        # Evidence exists but no human-reviewed authorization does. Scanning is
+        # allowed; *modifying* is not, and the exit code must not imply otherwise.
+        return report, 2
     return report, 1 if report.findings else 0
 
 
@@ -247,6 +257,7 @@ def main() -> int:
     summary = {
         0: "authorized; scans clean",
         1: f"authorized; {payload['finding_count']} finding(s)",
+        2: f"scanned; NOT authorized to modify ({report.status})",
         3: f"blocked ({report.status})",
         4: "package incomplete",
     }[code]

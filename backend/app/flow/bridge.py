@@ -36,6 +36,7 @@ from app.flow import protocol as proto
 from app.flow.provenance import (
     ExtensionProvenance,
     ProvenanceRejected,
+    TrustPolicy,
     UnsupportedProtocol,
     provenance_from_hello,
     verify_provenance,
@@ -111,8 +112,17 @@ class BridgeConfig:
     export_max_bytes: int = 25 * 1024 * 1024
     live_generation_enabled: bool = False
     #: Accept a package whose components sit on different release lines. Off by
-    #: default: that is exactly the drift the audit found upstream.
+    #: default: that is exactly the drift the audit found upstream. Accepting it
+    #: never yields a *trusted* session — see :class:`TrustPolicy`.
     allow_component_drift: bool = False
+    #: Phase 3C.2.1 trust anchors. Without one of these the bridge can verify that
+    #: a HELLO is self-consistent but never that the installed bytes are the bytes
+    #: Crusor expects, so the session is reported UNVERIFIED.
+    trusted_artifact_sha256: str = ""
+    trusted_release: str = ""
+    trusted_source_commit: str = ""
+    release_manifest_path: str = ""
+    release_manifest_public_key: str = ""
 
     def validate(self) -> "BridgeConfig":
         assert_loopback_bind(self.host)  # raises LoopbackBindError
@@ -125,7 +135,25 @@ class BridgeConfig:
             raise BridgeConfigError("HTTP and WebSocket listeners must use different ports.")
         if self.max_request_bytes <= 0 or self.max_connections < 1:
             raise BridgeConfigError("Limits must be positive.")
+        if self.live_generation_enabled and not self.trust_policy.has_anchor:
+            # Turning on live generation without an independent artifact anchor
+            # would let an unverified build spend real money.
+            raise BridgeConfigError(
+                "Live generation requires a trusted artifact anchor "
+                "(FLOW_TRUSTED_ARTIFACT_SHA256 or FLOW_RELEASE_MANIFEST_PATH)."
+            )
         return self
+
+    @property
+    def trust_policy(self) -> TrustPolicy:
+        return TrustPolicy(
+            trusted_artifact_sha256=self.trusted_artifact_sha256,
+            trusted_release=self.trusted_release,
+            trusted_source_commit=self.trusted_source_commit,
+            release_manifest_path=self.release_manifest_path,
+            release_manifest_public_key=self.release_manifest_public_key,
+            allow_component_drift=self.allow_component_drift,
+        )
 
     @property
     def origins(self) -> HostOriginPolicy:
@@ -143,6 +171,12 @@ class ExtensionSession:
     busy: bool = False
     provenance: ExtensionProvenance | None = None
     provenance_trusted: bool = False
+    provenance_state: str = "UNVERIFIED"
+    claims_well_formed: bool = False
+    components_consistent: bool = False
+    artifact_integrity_verified: bool = False
+    provenance_checks: tuple[str, ...] = ()
+    anchor_source: str = "none"
     provenance_warnings: tuple[str, ...] = ()
     pending: dict[str, asyncio.Future[proto.ResultEnvelope]] = field(default_factory=dict)
     task: asyncio.Task[None] | None = None
@@ -612,6 +646,14 @@ class FlowBridge:
                         "allowed_commands": list(proto.ALLOWED_COMMANDS),
                         "live_generation": False,
                         "provenance_trusted": session.provenance_trusted,
+                        "provenance_state": session.provenance_state,
+                        # Three separate facts, reported separately: a well-formed
+                        # HELLO is not an integrity check, and the ack must not imply
+                        # one by reusing the conjunction for the narrower name.
+                        "claims_well_formed": session.claims_well_formed,
+                        "components_consistent": session.components_consistent,
+                        "artifact_integrity_verified": session.artifact_integrity_verified,
+                        "trust_anchor": session.anchor_source,
                         "provenance": session.provenance.as_dict() if session.provenance else {},
                     }
                 )
@@ -668,14 +710,22 @@ class FlowBridge:
 
         # Phase 3C.2 §10: a claimed version is not a proven one.
         provenance = provenance_from_hello(hello)
+        policy = self.config.trust_policy
         try:
             report = verify_provenance(
-                provenance, allow_component_drift=self.config.allow_component_drift
+                provenance,
+                policy=policy,
+                allow_component_drift=self.config.allow_component_drift,
             )
         except UnsupportedProtocol as exc:
             return False, proto.WS_CLOSE_PROTOCOL, exc.code
         except ProvenanceRejected as exc:
             return False, proto.WS_CLOSE_PROVENANCE, exc.code
+
+        if policy.has_anchor and not report.artifact_integrity_verified:
+            # An anchor exists, so "cannot prove these bytes" is a refusal, not a
+            # warning: this is the case Phase 3C.2 wrongly called trusted.
+            return False, proto.WS_CLOSE_PROVENANCE, "artifact integrity unverified"
 
         session.extension_id = hello.extension_id
         session.extension_version = hello.extension_version
@@ -683,6 +733,12 @@ class FlowBridge:
         session.provenance = provenance
         session.provenance_trusted = report.trusted
         session.provenance_warnings = report.warnings
+        session.provenance_state = report.trust_state
+        session.claims_well_formed = report.claims_well_formed
+        session.components_consistent = report.components_consistent
+        session.artifact_integrity_verified = report.artifact_integrity_verified
+        session.provenance_checks = report.checks
+        session.anchor_source = report.anchor.source
         return True, 0, ""
 
     async def _ws_loop(self, session: ExtensionSession) -> None:
@@ -729,6 +785,22 @@ class FlowBridge:
             "session": self.session.as_dict() if self.session else None,
             "provenance": self.session.provenance.as_dict() if self.session and self.session.provenance else None,
             "provenance_trusted": bool(self.session and self.session.provenance_trusted),
+            "provenance_state": self.session.provenance_state if self.session else "UNVERIFIED",
+            "claims_well_formed": bool(self.session and self.session.claims_well_formed),
+            "components_consistent": bool(self.session and self.session.components_consistent),
+            "artifact_integrity_verified": bool(
+                self.session and self.session.artifact_integrity_verified
+            ),
+            "trust_anchor": self.session.anchor_source if self.session else "none",
+            "trust_policy": {
+                "anchor_configured": self.config.trust_policy.has_anchor,
+                "anchor_kind": (
+                    "signed_release_manifest"
+                    if self.config.release_manifest_path
+                    else ("pinned_digest" if self.config.trusted_artifact_sha256 else "none")
+                ),
+                "component_drift_allowed": self.config.allow_component_drift,
+            },
             "supported_protocols": list(proto.SUPPORTED_PROTOCOLS),
             "allowed_commands": list(proto.ALLOWED_COMMANDS),
             "denied_commands": sorted(proto.DENIED_COMMANDS),

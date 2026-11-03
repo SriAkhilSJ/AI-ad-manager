@@ -1113,7 +1113,9 @@ async def test_flow_status_reports_the_hardened_posture(client, auth, companion_
     response = await client.get(f"{FLOW_API}/status", headers=auth())
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["phase"] == "3C.1"
+    # The Phase 3C.1 boundary is still asserted; only the milestone label moves as
+    # later phases harden the same payload.
+    assert body["phase"] == "3C.2.1"
     assert body["live_generation_enabled"] is False
     assert body["bridge"]["loopback_only"] is True
     assert body["bridge"]["bind_host"] == "127.0.0.1"

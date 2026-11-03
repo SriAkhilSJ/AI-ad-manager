@@ -204,6 +204,16 @@ class Settings(BaseSettings):
     #: Where an authorised copy of the upstream package would live. Never
     #: committed; only the *presence and licence* are reported by /flow/status.
     flow_source_package_path: str = ""
+    #: Phase 3C.2.1: a human-reviewed authorization attestation, stored OUTSIDE
+    #: the package. Licence files alone never authorize anything.
+    flow_authorization_attestation_path: str = ""
+    #: Phase 3C.2.1 provenance trust anchors. A HELLO's self-reported digest is
+    #: never an anchor: trust comes from one of these, configured by an operator.
+    flow_trusted_artifact_sha256: str = ""
+    flow_trusted_release: str = ""
+    flow_trusted_source_commit: str = ""
+    flow_release_manifest_path: str = ""
+    flow_release_manifest_public_key: str = ""
     #: The companion reaches Crusor outbound; Crusor never dials the loopback port.
     flow_companion_id: str = ""
     flow_companion_secret: str = ""

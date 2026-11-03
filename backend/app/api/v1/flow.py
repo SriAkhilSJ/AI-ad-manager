@@ -421,6 +421,7 @@ async def upload_export_bytes(
         data=data,
         companion_id=companion_id,
         declared_content_type=request.headers.get("x-media-type", ""),
+        expected_ticket_id=ticket_id,
         actor_id=None,
     )
     await session.commit()
@@ -491,7 +492,10 @@ async def upload_export_chunk(
         raise ValidationProblem("The chunk was empty.")
 
     service = FlowAssetExportService(session, settings, get_storage(settings))
-    await service.get_ticket(ticket_id)  # the token must belong to *this* ticket
+    # The ticket named in the URL is part of the authorization decision, so the
+    # service resolves the token and compares identity *before* writing anything.
+    # A post-mutation comparison (Phase 3C.2) would already have mutated the token's
+    # own ticket by the time the mismatch was noticed.
     ticket, _asset = await service.accept_chunk(
         token=x_export_token,
         index=index,
@@ -499,9 +503,8 @@ async def upload_export_chunk(
         chunk_sha256=x_chunk_sha256 or "",
         data=bytes(buffer),
         companion_id=companion_id,
+        expected_ticket_id=ticket_id,
     )
-    if ticket.id != ticket_id:
-        raise ValidationProblem("The export token belongs to a different ticket.")
     await session.commit()
     return _export_status(ticket)
 

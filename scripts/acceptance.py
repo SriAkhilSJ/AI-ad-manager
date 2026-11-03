@@ -1782,7 +1782,9 @@ def main() -> int:
     def c48() -> str:
         """The Flow integration is reported honestly and generation stays off."""
         _, status = http.call("GET", f"{flow}/status", expect=200)
-        assert status["phase"] == "3C.1"
+        # The label follows the current hardening milestone; every boundary below
+        # is still the Phase 3C.1 one and is asserted unchanged.
+        assert status["phase"] == "3C.2.1"
         assert status["live_generation_enabled"] is False
         assert status["available"] is False and status["enabled"] is False
         bridge = status["bridge"]
@@ -1807,7 +1809,7 @@ def main() -> int:
         _, system = http.call("GET", "/system/status", expect=200)
         assert system["flow"]["live_generation_enabled"] is False
         return (
-            f"phase 3C.1, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
+            f"phase 3C.2.1, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
             f"max_live_jobs=1, {len(blockers)} upstream blockers reported (generation off)"
         )
 
@@ -2052,10 +2054,12 @@ def main() -> int:
             "from app.flow.bridge import BridgeConfig, FlowBridge\n"
             "from app.flow.security import generate_pairing_id, generate_pairing_secret\n"
             "EXT = 'abcdefghijklmnopabcdefghijklmnop'\n"
+            "DIGEST = 'a' * 64\n"
             "BASE = {'type': 'hello', 'protocol': 'flow.bridge.v1', 'extension_id': EXT,\n"
             "        'extension_version': '1.3.0', 'service_worker_version': '1.3.0',\n"
             "        'mcp_version': '1.3.0', 'source_commit': '0343884',\n"
-            "        'build_id': 'acceptance-build-1', 'flow_tab_present': True}\n"
+            "        'build_id': 'acceptance-build-1', 'package_sha256': DIGEST,\n"
+            "        'flow_tab_present': True}\n"
             "async def attempt(bridge, frame):\n"
             "    ws = await websockets.connect(f'ws://127.0.0.1:{bridge.ws_port}/ws')\n"
             "    try:\n"
@@ -2070,7 +2074,8 @@ def main() -> int:
             "async def main():\n"
             "    pid, secret = generate_pairing_id(), generate_pairing_secret()\n"
             "    bridge = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
-            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0))\n"
+            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0,\n"
+            "        trusted_artifact_sha256=DIGEST, trusted_release='1.3.0'))\n"
             "    await bridge.start()\n"
             "    auth = {'pairing_id': pid, 'pairing_secret': secret}\n"
             "    out = {}\n"
@@ -2080,7 +2085,8 @@ def main() -> int:
             "    out['build_id'] = good.get('ack', {}).get('provenance', {}).get('build_id')\n"
             "    await bridge.stop()\n"
             "    bridge2 = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
-            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0))\n"
+            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0,\n"
+            "        trusted_artifact_sha256=DIGEST, trusted_release='1.3.0'))\n"
             "    await bridge2.start()\n"
             "    out['version_split'] = (await attempt(bridge2, {**BASE, **auth,\n"
             "        'extension_version': '1.2.1', 'service_worker_version': '1.2.0',\n"
@@ -2089,8 +2095,19 @@ def main() -> int:
             "        'protocol': 'flow.bridge.v0'})).get('close')\n"
             "    out['no_commit'] = (await attempt(bridge2, {**BASE, **auth,\n"
             "        'source_commit': ''})).get('close')\n"
+            "    out['wrong_digest'] = (await attempt(bridge2, {**BASE, **auth,\n"
+            "        'package_sha256': 'b' * 64})).get('close')\n"
+            "    out['no_digest'] = (await attempt(bridge2, {**BASE, **auth,\n"
+            "        'package_sha256': ''})).get('close')\n"
             "    out['paired_after_refusals'] = bridge2.paired\n"
             "    await bridge2.stop()\n"
+            "    bridge3 = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
+            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0))\n"
+            "    await bridge3.start()\n"
+            "    unanchored = await attempt(bridge3, {**BASE, **auth})\n"
+            "    out['unanchored_state'] = unanchored.get('ack', {}).get('provenance_state')\n"
+            "    out['unanchored_trusted'] = unanchored.get('ack', {}).get('provenance_trusted')\n"
+            "    await bridge3.stop()\n"
             "    print(json.dumps(out))\n"
             "asyncio.run(main())\n"
         )
@@ -2110,14 +2127,18 @@ def main() -> int:
         assert result["version_split"] == 4422, result
         assert result["old_protocol"] == 4426, result
         assert result["no_commit"] == 4422, result
+        assert result["wrong_digest"] == 4422, result
+        assert result["no_digest"] == 4422, result
         assert result["paired_after_refusals"] is False, result
+        assert result["unanchored_state"] == "UNVERIFIED", result
+        assert result["unanchored_trusted"] is False, result
         return (
-            "consistent build accepted with build_id provenance; 1.2.1/1.2.0/1.0.0 split "
-            "closed 4422; unsupported protocol closed 4426; missing commit closed 4422; "
-            "bridge still unpaired"
+            "anchored build accepted (VERIFIED); 1.2.1/1.2.0/1.0.0 split, missing commit, "
+            "wrong digest and missing digest all closed 4422; unsupported protocol 4426; "
+            "without an anchor the same build is reported UNVERIFIED, never trusted"
         )
 
-    harness.check("55. Extension provenance is verified, not trusted", c55)
+    harness.check("55. Extension provenance requires an independent anchor", c55)
 
     def c56() -> str:
         """A real chunked export lands verified bytes; bad chunk sequences do not."""
@@ -2345,6 +2366,137 @@ def main() -> int:
         )
 
     harness.check("58. Phase 3C.1 boundary is intact", c58)
+
+    def c59() -> str:
+        """A file called LICENSE never authorizes anything (Phase 3C.2.1)."""
+        code = (
+            "import hashlib, json, tempfile\n"
+            "from pathlib import Path\n"
+            "from app.flow.authorization import package_tree_digest\n"
+            "from app.flow.source_gate import evaluate_source_gate\n"
+            "FILES = ['manifest.json', 'service-worker.js', 'content-script-main.js',\n"
+            "         'content-script-isolated.js', 'mcp-server/src/server.js',\n"
+            "         'mcp-server/src/ws-bridge.js', 'mcp-server/package.json']\n"
+            "LICENCE = ('MIT License\\n\\nPermission is hereby granted, free of charge, to any '\n"
+            "           'person obtaining a copy of this software.\\n')\n"
+            "root = Path(tempfile.mkdtemp()) / 'pkg'\n"
+            "for name in FILES:\n"
+            "    path = root / name\n"
+            "    path.parent.mkdir(parents=True, exist_ok=True)\n"
+            "    path.write_text('// ' + name)\n"
+            "out = {}\n"
+            "out['none'] = evaluate_source_gate(root).status\n"
+            "(root / 'LICENSE').write_text('   ')\n"
+            "out['empty'] = evaluate_source_gate(root).status\n"
+            "(root / 'LICENSE').write_text('All rights reserved. Proprietary.\\n')\n"
+            "arbitrary = evaluate_source_gate(root)\n"
+            "out['arbitrary'] = arbitrary.status\n"
+            "out['arbitrary_authorized'] = arbitrary.authorized\n"
+            "(root / 'LICENSE').write_text(LICENCE)\n"
+            "out['evidence'] = evaluate_source_gate(root).status\n"
+            "digest = package_tree_digest(root)\n"
+            "attestation = Path(tempfile.mkdtemp()) / 'att.json'\n"
+            "def document():\n"
+            "    return {'schema': 'crusor.flow.authorization.v1',\n"
+            "        'upstream_project_url': 'https://github.com/example/deepx-flow',\n"
+            "        'release': {'tag': 'v1.2.1', 'commit': '0343884'},\n"
+            "        'package': {'sha256': package_tree_digest(root)},\n"
+            "        'licence': {'name': 'MIT', 'evidence_reference': 'LICENSE',\n"
+            "            'evidence_sha256': hashlib.sha256((root / 'LICENSE').read_bytes()).hexdigest()},\n"
+            "        'rights': {'modification_permitted': True, 'redistribution_permitted': True},\n"
+            "        'review': {'reviewer': 'Ada Lovelace',\n"
+            "            'reviewed_at': '2026-11-03T18:00:00Z',\n"
+            "            'evidence_reference': 'legal-ticket-1234'}}\n"
+            "attestation.write_text(json.dumps(document()))\n"
+            "authorized = evaluate_source_gate(root, attestation_path=str(attestation))\n"
+            "out['authorized'] = authorized.status\n"
+            "out['authorized_bound'] = authorized.attestation.bound\n"
+            "out['digest_matches'] = authorized.package_digest == digest\n"
+            "bad = document(); bad['package'] = {'sha256': 'b' * 64}\n"
+            "attestation.write_text(json.dumps(bad))\n"
+            "out['digest_mismatch'] = evaluate_source_gate(root, attestation_path=str(attestation)).status\n"
+            "attestation.write_text(json.dumps(document()))\n"
+            "(root / 'service-worker.js').write_text('// patched')\n"
+            "out['package_changed'] = evaluate_source_gate(root, attestation_path=str(attestation)).status\n"
+            "print(json.dumps(out))\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=180,
+        )
+        assert proc.returncode == 0, proc.stderr[-1200:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["none"] == "LICENSING_BLOCKED", result
+        assert result["empty"] == "LICENSING_BLOCKED", result
+        assert result["arbitrary"] == "LICENSE_EVIDENCE_PRESENT", result
+        assert result["arbitrary_authorized"] is False, result
+        assert result["evidence"] == "LICENSE_EVIDENCE_PRESENT", result
+        assert result["authorized"] == "AUTHORIZED", result
+        assert result["authorized_bound"] is True, result
+        assert result["digest_matches"] is True, result
+        assert result["digest_mismatch"] == "AUTHORIZATION_REVIEW_REQUIRED", result
+        assert result["package_changed"] == "AUTHORIZATION_REVIEW_REQUIRED", result
+        return (
+            "no/empty licence blocked; arbitrary proprietary text is evidence only "
+            "(not authorized); a reviewed attestation bound to the tree digest authorizes; "
+            "a digest mismatch and a one-byte package change both invalidate it"
+        )
+
+    harness.check("59. Licence presence never becomes permission", c59)
+
+    def c60() -> str:
+        """A token for one export ticket cannot mutate another ticket by URL."""
+        companion_headers = {
+            "X-Companion-Id": "acceptance-companion",
+            "X-Companion-Secret": os.environ.get("FLOW_COMPANION_SECRET", ""),
+        }
+        assert companion_headers["X-Companion-Secret"], (
+            "FLOW_COMPANION_SECRET must be configured for the ticket-binding check"
+        )
+        _, first = http.call(
+            "POST",
+            f"{flow}/exports",
+            {"companion_id": "acceptance-companion", "filename": "binding-a.png"},
+        )
+        _, second = http.call(
+            "POST",
+            f"{flow}/exports",
+            {"companion_id": "acceptance-companion", "filename": "binding-b.png"},
+        )
+        chunk = minimal_png(20, 24)
+        digest = hashlib.sha256(chunk).hexdigest()
+
+        cross, _ = put_chunk(
+            http, first["id"], second["upload_token"], companion_headers, 0, 1, chunk
+        )
+        assert cross == 422, cross
+
+        _, first_state = http.call("GET", f"{flow}/exports/{first['id']}", expect=200)
+        _, second_state = http.call("GET", f"{flow}/exports/{second['id']}", expect=200)
+        for state in (first_state, second_state):
+            assert state["status"] == "pending", state
+            assert state["chunks_received"] == 0, state
+            assert state["asset_id"] is None, state
+
+        # Identity, not luck: the correct pairing still uploads.
+        ok, body = put_chunk(
+            http, first["id"], first["upload_token"], companion_headers, 0, 1, chunk
+        )
+        assert ok == 200, (ok, body)
+        assert body["status"] == "consumed", body
+        assert body["checksum"] == digest, body
+        assert body["asset_id"], body
+        return (
+            "token for ticket B posted to ticket A's URL refused 422 with no mutation on "
+            "either ticket (no staging object, no asset); the correct pairing still "
+            "consumes and verifies the asset"
+        )
+
+    harness.check("60. Export tickets are bound to their own URL", c60)
 
 
     # ---- summary ---------------------------------------------------------

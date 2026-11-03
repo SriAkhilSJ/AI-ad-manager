@@ -11,6 +11,8 @@ import {
   IconCalendar,
   IconCampaign,
   IconDirector,
+  IconResearch,
+  IconStrategy,
   IconOverview,
   IconSettings,
   IconSocial,
@@ -27,6 +29,9 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Overview', icon: IconOverview, end: true },
   { to: '/director', label: 'AI Marketing Director', icon: IconDirector },
+  { to: '/strategy-director', label: 'Marketing Director', icon: IconStrategy },
+  { to: '/research', label: 'Research Centre', icon: IconResearch },
+  { to: '/strategy', label: 'Strategy Studio', icon: IconStrategy },
   { to: '/campaigns', label: 'Campaigns', icon: IconCampaign },
   { to: '/calendar', label: 'Content Calendar', icon: IconCalendar },
   { to: '/creative', label: 'Creative Studio', icon: IconStudio },

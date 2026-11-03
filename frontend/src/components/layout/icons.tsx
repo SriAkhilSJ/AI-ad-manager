@@ -30,6 +30,23 @@ export const IconOverview = (p: IconProps) => (
   </Svg>
 )
 
+export const IconResearch = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="M15.5 15.5 21 21" />
+    <path d="M8 10.5h5M10.5 8v5" />
+  </Svg>
+)
+
+export const IconStrategy = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 20V4" />
+    <path d="M4 20h16" />
+    <path d="M7 16l4-5 3 3 5-7" />
+    <circle cx="19" cy="7" r="1.5" />
+  </Svg>
+)
+
 export const IconDirector = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="5" r="2.5" />

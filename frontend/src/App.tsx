@@ -6,6 +6,9 @@ import { Spinner } from './components/ui'
 import { LoginPage } from './pages/Login'
 import { OverviewPage } from './pages/Overview'
 import { DirectorPage } from './pages/Director'
+import { ResearchCentrePage } from './pages/ResearchCentre'
+import { StrategyStudioPage } from './pages/StrategyStudio'
+import { StrategyDirectorPage } from './pages/StrategyDirector'
 import { CampaignsPage } from './pages/Campaigns'
 import { CampaignDetailPage } from './pages/CampaignDetail'
 import { ContentCalendarPage } from './pages/ContentCalendar'
@@ -67,6 +70,9 @@ export default function App() {
       >
         <Route index element={<OverviewPage />} />
         <Route path="director" element={<DirectorPage />} />
+        <Route path="strategy-director" element={<StrategyDirectorPage />} />
+        <Route path="research" element={<ResearchCentrePage />} />
+        <Route path="strategy" element={<StrategyStudioPage />} />
         <Route path="campaigns" element={<CampaignsPage />} />
         <Route path="campaigns/:id" element={<CampaignDetailPage />} />
         <Route path="calendar" element={<ContentCalendarPage />} />

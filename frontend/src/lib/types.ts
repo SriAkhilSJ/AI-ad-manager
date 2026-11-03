@@ -463,3 +463,326 @@ export interface GraphTopology {
   interrupts: string[]
   checkpointer: string
 }
+
+// ==========================================================================
+// Phase 2: research & strategy intelligence
+// ==========================================================================
+
+export type ResearchStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'partial'
+  | 'failed'
+  | 'budget_exceeded'
+  | 'cancelled'
+  | 'unavailable'
+
+export type VerificationStatus =
+  | 'verified'
+  | 'unverified'
+  | 'needs_confirmation'
+  | 'disputed'
+
+export interface ResearchProject {
+  id: string
+  brand_profile_id: string
+  objective: string
+  categories: string[]
+  status: ResearchStatus
+  summary: string
+  provider: string
+  max_cost_usd: number
+  estimated_cost_usd: number
+  actual_cost_usd: number
+  tokens_used: number
+  tool_calls: number
+  iterations: number
+  finding_count: number
+  source_count: number
+  gap_count: number
+  error_code: string
+  error_message: string
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+}
+
+export interface ResearchSource {
+  id: string
+  url: string
+  title: string
+  publisher: string
+  credibility: string
+  retrieved_at: string | null
+  provider: string
+  excerpt: string
+}
+
+export interface ResearchFinding {
+  id: string
+  research_project_id: string
+  category: string
+  finding: string
+  evidence_summary: string
+  source_url: string
+  source_title: string
+  retrieved_at: string | null
+  confidence: number
+  verification_status: VerificationStatus
+  competitor_name: string
+  tags: string[]
+  provider: string
+  created_at: string
+}
+
+export interface ResearchFindingPage {
+  items: ResearchFinding[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface ResearchProjectDetail {
+  project: ResearchProject
+  findings: ResearchFinding[]
+  sources: ResearchSource[]
+  category_coverage: Array<{ category: string; findings: number; avg_confidence: number }>
+  missing_categories: string[]
+}
+
+export interface ResearchRunResult {
+  project: ResearchProject
+  findings_created: number
+  sources_created: number
+  gaps: string[]
+  warnings: string[]
+  provider: string
+  provider_status: string
+  cost: Record<string, number | string>
+  limits: Record<string, number | string | boolean>
+  stop_reason: string
+}
+
+export interface ResearchCapabilities {
+  provider: {
+    provider: string
+    status: 'available' | 'degraded' | 'unavailable'
+    available: boolean
+    network: boolean
+    note: string
+    max_sources?: number
+  }
+  categories: string[]
+  verification_statuses: string[]
+  max_sources: number
+  budget_usd: number
+  note: string
+}
+
+export interface CompetitorSnapshot {
+  name: string
+  website: string | null
+  positioning: string | null
+  source: string | null
+  findings: number
+}
+
+export type StrategyStatus =
+  | 'DRAFT'
+  | 'IN_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CHANGES_REQUESTED'
+  | 'SUPERSEDED'
+  | 'ARCHIVED'
+
+export interface Strategy {
+  id: string
+  brand_profile_id: string
+  research_project_id: string | null
+  campaign_id: string | null
+  workflow_thread_id: string | null
+  name: string
+  objective: string
+  status: StrategyStatus
+  primary_objective_type: string
+  version_count: number
+  current_version_id: string | null
+  created_by_agent: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface StrategySummary extends Strategy {
+  has_valid_approval: boolean
+  approved_version_id: string | null
+  approved_at: string | null
+  latest_version_number: number
+  confidence: number
+  business_objectives: string[]
+}
+
+export interface StrategyVersion {
+  id: string
+  strategy_id: string
+  version_number: number
+  positioning_recommendations: Array<Record<string, unknown>>
+  audience_segmentation: Array<Record<string, unknown>>
+  competitor_differentiation: Array<Record<string, unknown>>
+  content_pillars: Array<Record<string, unknown>>
+  campaign_concepts: Array<Record<string, unknown>>
+  platform_strategies: Array<Record<string, unknown>>
+  weekly_objectives: Array<Record<string, unknown>>
+  publishing_frequency: Record<string, unknown>
+  lead_generation: Array<Record<string, unknown>>
+  growth_experiments: Array<Record<string, unknown>>
+  kpis: Array<Record<string, unknown>>
+  measurement_plan: Record<string, unknown>
+  business_objectives: string[]
+  objective_alignment: Record<string, unknown>
+  source_finding_ids: string[]
+  research_summary: string
+  rationale: string
+  brand_check: Record<string, unknown>
+  missing_information: Array<Record<string, unknown>>
+  warnings: string[]
+  generation_mode: string
+  confidence: number
+  cost_usd: number
+  tokens_used: number
+  content_hash: string
+  change_note: string
+  created_by_agent: string | null
+  created_at: string
+}
+
+export interface StrategyDetail {
+  strategy: Strategy
+  current_version: StrategyVersion | null
+  versions: Array<{
+    id: string
+    version_number: number
+    content_hash: string
+    change_note: string
+    confidence: number
+    cost_usd: number
+    generation_mode: string
+    created_at: string | null
+    business_objectives: string[]
+  }>
+  approval: {
+    id: string
+    strategy_version_id: string
+    actor_id: string | null
+    actor_role: string
+    reason: string
+    content_hash: string
+    created_at: string | null
+  } | null
+  approval_history: Array<{
+    id: string
+    action: string
+    strategy_version_id: string
+    actor_role: string
+    reason: string
+    is_valid: boolean
+    invalidated_at: string | null
+    invalidated_reason: string
+    created_at: string | null
+  }>
+  can_execute: boolean
+  execution_blocked_reason: string
+  experiments: Array<{
+    id: string
+    name: string
+    hypothesis: string
+    channel: string
+    objective_type: string
+    primary_metric: string
+    expected_effort: string
+    status: string
+  }>
+}
+
+export interface StrategyCapabilities {
+  business_objectives: string[]
+  budget_usd: number
+  budget_inr_equivalent: number
+  max_iterations: number
+  models: { reasoning: string | null; auxiliary: string | null }
+  topology: GraphTopology
+  estimate_example: CostEstimate
+  note: string
+}
+
+export interface CostEstimate {
+  estimated_cost_usd: number
+  estimated_cost_inr: number
+  budget_usd: number
+  budget_inr: number
+  within_budget: boolean
+  research_calls: number
+  strategy_calls: number
+  models: { reasoning: string | null; auxiliary: string | null }
+  assumptions: string[]
+  note: string
+}
+
+export interface VersionDiff {
+  left: { id: string; version_number: number }
+  right: { id: string; version_number: number }
+  changed_fields: string[]
+  changes: Record<string, unknown>
+  identical: boolean
+}
+
+export interface StrategyWorkflowState {
+  workflow_id?: string
+  status: string
+  phase: string
+  phase_label?: string
+  objective?: string
+  iteration?: number
+  max_iterations?: number
+  research_needed?: boolean
+  research_rounds?: Array<{
+    round: number
+    categories_requested: string[]
+    findings_created: number
+    gaps: string[]
+    provider: string
+    stop_reason: string
+    at: string
+  }>
+  findings_summary?: Record<string, unknown>
+  evidence_verdict?: string | null
+  evidence_assessment?: Record<string, unknown>
+  brand_snapshot?: Record<string, unknown>
+  unverified_brand_claims?: string[]
+  strategy_id?: string | null
+  strategy_version_id?: string | null
+  strategy_version_number?: number
+  strategy?: Record<string, unknown> | null
+  brand_check?: Record<string, unknown>
+  missing_information?: Array<{ area: string; detail: string; blocks_decision?: boolean }>
+  approval_request?: Record<string, unknown> | null
+  approval_decision?: Record<string, unknown> | null
+  cost_estimate?: CostEstimate
+  cost_actual?: Record<string, number>
+  limits?: Record<string, number | boolean>
+  events?: Array<Record<string, unknown>>
+  trace?: Array<Record<string, unknown>>
+  errors?: Array<Record<string, unknown>>
+  summary?: string
+  interrupted?: boolean
+  awaiting_human?: boolean
+  next?: string[]
+  checkpoint_count?: number
+}
+
+export interface StrategyWorkflowStartResponse {
+  workflow_id: string
+  cost_estimate: CostEstimate
+  state: StrategyWorkflowState
+}

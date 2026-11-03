@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useApi, useMutation } from '../hooks/useApi'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../hooks/useToast'
-import { brandApi } from '../lib/api'
+import { brandApi, researchApi } from '../lib/api'
 import { formatDateTime, titleCase } from '../lib/format'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
@@ -11,11 +11,13 @@ import {
   Button,
   Card,
   CardHeader,
+  Divider,
   EmptyState,
   Input,
   Mono,
   SectionTitle,
   Skeleton,
+  SkeletonRows,
   Textarea,
 } from '../components/ui'
 import { IconBrand } from '../components/layout/icons'
@@ -50,6 +52,18 @@ export function BrandKnowledgePage() {
   const competitors = useApi(() => brandApi.competitors(brand.data!.id), [brand.data?.id], {
     enabled: Boolean(brand.data?.id),
   })
+
+  // Phase 2: what the system knows, and what it still needs confirmed.
+  const findings = useApi(
+    () => researchApi.findings({ brand_profile_id: brand.data!.id, limit: 500 }),
+    [brand.data?.id],
+    { enabled: Boolean(brand.data?.id) },
+  )
+  const evidence = useApi(
+    () => researchApi.competitors(brand.data!.id),
+    [brand.data?.id],
+    { enabled: Boolean(brand.data?.id) },
+  )
 
   const save = useMutation(() =>
     brandApi.update(brand.data!.id, {
@@ -105,6 +119,18 @@ export function BrandKnowledgePage() {
   }
 
   const data = brand.data
+
+  const allFindings = findings.data?.items ?? []
+  const verifiedFacts = allFindings.filter(
+    (finding) => finding.category === 'feature_comparison' && finding.verification_status === 'verified',
+  )
+  const unverifiedFacts = allFindings.filter(
+    (finding) => finding.category === 'feature_comparison' && finding.verification_status !== 'verified',
+  )
+  const unverifiedClaims = allFindings
+    .filter((finding) => finding.verification_status === 'needs_confirmation')
+    .map((finding) => finding.finding)
+  const audienceSegments = data.audience
 
   return (
     <div className="space-y-5">
@@ -368,6 +394,180 @@ export function BrandKnowledgePage() {
           </div>
         </Card>
       </div>
+
+      <Divider className="!my-2" />
+      <SectionTitle>Knowledge base: what is confirmed, and what is not</SectionTitle>
+      <Banner tone="warn" title="Only confirmed facts may be used as claims">
+        Everything the agents say about the product must trace back to a verified fact. Facts listed
+        as needing confirmation are excluded from strategy and content until you confirm them with a
+        real source.
+      </Banner>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Product facts"
+            subtitle="The factual envelope agents are allowed to work inside."
+            action={
+              <Badge tone={unverifiedFacts.length ? 'warn' : 'ok'}>
+                {unverifiedFacts.length} unconfirmed
+              </Badge>
+            }
+          />
+          <div className="space-y-2 px-5 py-4">
+            {findings.loading ? (
+              <SkeletonRows rows={3} height="h-10" />
+            ) : verifiedFacts.length === 0 && unverifiedFacts.length === 0 ? (
+              <EmptyState
+                compact
+                title="No product facts recorded"
+                description="Seed the knowledge base (python -m app.seed.brand_crusor) or run research to build it."
+              />
+            ) : (
+              <>
+                {verifiedFacts.map((fact) => (
+                  <div
+                    key={fact.id}
+                    className="rounded-md border border-signal-ok/20 bg-signal-ok/[0.04] px-2.5 py-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      <Badge tone="ok">confirmed</Badge>
+                      <p className="text-[11px] leading-relaxed text-steel-300">{fact.finding}</p>
+                    </div>
+                    {fact.source_url && (
+                      <a
+                        href={fact.source_url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="mt-1 block truncate text-[10px] text-violet-300 hover:text-violet-200"
+                      >
+                        {fact.source_url}
+                      </a>
+                    )}
+                  </div>
+                ))}
+                {unverifiedFacts.map((fact) => (
+                  <div
+                    key={fact.id}
+                    className="rounded-md border border-signal-warn/20 bg-signal-warn/[0.04] px-2.5 py-2"
+                  >
+                    <div className="flex items-start gap-2">
+                      <Badge tone="warn">needs confirmation</Badge>
+                      <div>
+                        <p className="text-[11px] leading-relaxed text-steel-300">{fact.finding}</p>
+                        {fact.evidence_summary && (
+                          <p className="mt-1 text-[10px] leading-relaxed text-steel-600">
+                            {fact.evidence_summary}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Competitors and their evidence"
+            subtitle="A name with no evidence cannot support a comparative claim."
+          />
+          <div className="space-y-2 px-5 py-4">
+            {evidence.loading ? (
+              <Skeleton className="h-16 w-full" />
+            ) : (evidence.data ?? []).length === 0 ? (
+              <p className="text-[11px] text-steel-600">No competitors recorded.</p>
+            ) : (
+              evidence.data!.map((competitor) => (
+                <div
+                  key={competitor.name}
+                  className="flex items-center gap-2 rounded-md border border-white/[0.05] px-2.5 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-steel-300">{competitor.name}</p>
+                    {!competitor.positioning && (
+                      <p className="text-[10px] text-signal-warn/80">no positioning verified</p>
+                    )}
+                  </div>
+                  <Badge tone={competitor.findings > 0 ? 'ok' : 'muted'} className="ml-auto">
+                    {competitor.findings} finding{competitor.findings === 1 ? '' : 's'}
+                  </Badge>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="Audience segments"
+            subtitle="From the founder brief. Motivations are assumptions until research confirms them."
+          />
+          <div className="space-y-2 px-5 py-4">
+            {audienceSegments.length === 0 ? (
+              <p className="text-[11px] text-steel-600">
+                Segments are derived from the profile audience list above.
+              </p>
+            ) : (
+              audienceSegments.map((segment) => (
+                <div key={segment} className="rounded-md border border-white/[0.05] px-2.5 py-2">
+                  <p className="text-[11px] text-steel-300">{segment}</p>
+                  <p className="mt-0.5 text-[10px] text-steel-600">
+                    stated audience — confirm motivation with research
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Business objectives"
+            subtitle="Strategies must map to at least one of the five approved outcomes."
+          />
+          <div className="space-y-1.5 px-5 py-4">
+            {[
+              'Developer acquisition (primary)',
+              'Waitlist registrations',
+              'Product adoption',
+              'Community growth',
+              'Brand awareness (supporting only)',
+            ].map((objective) => (
+              <div key={objective} className="flex items-center gap-2">
+                <span className="h-1 w-1 rounded-full bg-violet-400/70" />
+                <span className="text-[11px] text-steel-400">{objective}</span>
+              </div>
+            ))}
+            <p className="mt-2 border-t border-white/[0.05] pt-2 text-[10px] leading-relaxed text-steel-600">
+              Follower counts, likes and impressions are recorded as context but are never treated
+              as the success criterion.
+            </p>
+          </div>
+        </Card>
+      </div>
+
+      {unverifiedClaims.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Unverified claims pending founder confirmation"
+            subtitle="Excluded from generated strategies and content."
+            action={<Badge tone="warn">{unverifiedClaims.length}</Badge>}
+          />
+          <ul className="space-y-1.5 px-5 py-4">
+            {unverifiedClaims.map((claim, index) => (
+              <li key={index} className="flex items-start gap-2">
+                <Badge tone="warn">unconfirmed</Badge>
+                <span className="text-[11px] leading-relaxed text-steel-400">{claim}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </div>
   )
 }

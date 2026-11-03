@@ -28,13 +28,27 @@ import type {
   MarketingGoal,
   PlatformStatus,
   PublishedPost,
+  ResearchCapabilities,
+  ResearchFinding,
+  ResearchFindingPage,
+  ResearchProject,
+  ResearchProjectDetail,
+  ResearchRunResult,
+  CompetitorSnapshot,
   Role,
   ScheduledPost,
   SocialAccount,
+  StrategyCapabilities,
+  StrategyDetail,
+  StrategySummary,
+  StrategyVersion,
+  StrategyWorkflowStartResponse,
+  StrategyWorkflowState,
   SystemStatus,
   TokenResponse,
   UsageSummary,
   User,
+  VersionDiff,
   WorkflowStatus,
   WorkflowSummary,
 } from './types'
@@ -396,4 +410,164 @@ export const analyticsApi = {
   usage: (days = 30) => request<UsageSummary>('/usage/summary', { query: { days } }),
   agentRuns: (limit = 20) =>
     request<AgentRunSummary[]>('/usage/agent-runs', { query: { limit } }),
+}
+
+// ===================================================================== research
+export const researchApi = {
+  capabilities: () => request<ResearchCapabilities>('/research/capabilities'),
+
+  projects: (query?: { brand_profile_id?: string; status?: string; limit?: number }) =>
+    request<ResearchProject[]>('/research/projects', { query }),
+
+  project: (id: string) => request<ResearchProjectDetail>(`/research/projects/${id}`),
+
+  create: (payload: {
+    brand_profile_id: string
+    objective: string
+    categories?: string[]
+    max_cost_usd?: number | null
+    run_now?: boolean
+  }) =>
+    request<ResearchRunResult>('/research/projects', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey: newIdempotencyKey('research'),
+    }),
+
+  run: (id: string) =>
+    request<ResearchRunResult>(`/research/projects/${id}/run`, {
+      method: 'POST',
+      idempotencyKey: newIdempotencyKey('research-run'),
+    }),
+
+  findings: (query: {
+    brand_profile_id?: string
+    project_id?: string
+    category?: string
+    verification_status?: string
+    min_confidence?: number
+    competitor?: string
+    limit?: number
+    offset?: number
+  }) => request<ResearchFindingPage>('/research/findings', { query }),
+
+  verify: (id: string, sourceUrl: string) =>
+    request<ResearchFinding>(`/research/findings/${id}/verify`, {
+      method: 'PATCH',
+      query: { source_url: sourceUrl },
+    }),
+
+  competitors: (brandProfileId: string) =>
+    request<CompetitorSnapshot[]>('/research/competitors', {
+      query: { brand_profile_id: brandProfileId },
+    }),
+}
+
+// ===================================================================== strategy
+export const strategyApi = {
+  capabilities: () => request<StrategyCapabilities>('/strategy/capabilities'),
+
+  list: (query?: { brand_profile_id?: string; status?: string; limit?: number }) =>
+    request<StrategySummary[]>('/strategy/', { query }),
+
+  get: (id: string) => request<StrategyDetail>(`/strategy/${id}`),
+
+  generate: (payload: {
+    brand_profile_id: string
+    objective: string
+    business_objectives?: string[]
+    primary_objective_type?: string
+    research_project_id?: string | null
+    platforms?: string[]
+    name?: string
+    max_cost_usd?: number | null
+  }) =>
+    request<StrategyDetail>('/strategy/generate', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey: newIdempotencyKey('strategy'),
+    }),
+
+  version: (strategyId: string, versionId: string) =>
+    request<StrategyVersion>(`/strategy/${strategyId}/versions/${versionId}`),
+
+  createVersion: (strategyId: string, payload: Record<string, unknown>) =>
+    request<StrategyDetail>(`/strategy/${strategyId}/versions`, {
+      method: 'POST',
+      body: payload,
+      idempotencyKey: newIdempotencyKey('strategy-edit'),
+    }),
+
+  diff: (strategyId: string, left: number, right: number) =>
+    request<VersionDiff>(`/strategy/${strategyId}/diff`, { query: { left, right } }),
+
+  decide: (
+    strategyId: string,
+    payload: { action: string; reason?: string; version_id?: string | null },
+  ) =>
+    request<StrategyDetail>(`/strategy/${strategyId}/decision`, {
+      method: 'POST',
+      body: payload,
+      idempotencyKey: newIdempotencyKey('strategy-decision'),
+    }),
+
+  executionStatus: (strategyId: string) =>
+    request<{
+      strategy_id: string
+      status: string
+      current_version_id: string | null
+      current_version_number: number | null
+      can_execute: boolean
+      blocked_reason: string
+      approved_version_id: string
+      approval_id: string
+      actions_available: string
+    }>(`/strategy/${strategyId}/execution-status`),
+
+  approvalHistory: (strategyId: string) =>
+    request<StrategyDetail['approval_history']>(`/strategy/${strategyId}/approval-history`),
+}
+
+// ======================================================= strategy director flow
+export const strategyDirectorApi = {
+  estimate: (budgetUsd?: number) =>
+    request<StrategyCapabilities['estimate_example']>('/director/strategy/estimate', {
+      query: budgetUsd !== undefined ? { budget_usd: budgetUsd } : undefined,
+    }),
+
+  topology: () => request<StrategyCapabilities['topology']>('/director/strategy/topology'),
+
+  start: (payload: {
+    brand_profile_id: string
+    objective: string
+    business_objectives?: string[]
+    primary_objective_type?: string
+    platforms?: string[]
+    research_project_id?: string | null
+    budget_usd?: number | null
+    max_iterations?: number | null
+  }) =>
+    request<StrategyWorkflowStartResponse>('/director/strategy/start', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey: newIdempotencyKey('strategy-workflow'),
+    }),
+
+  workflows: (limit = 50) =>
+    request<Array<{ workflow_id: string; status: string; node: string; step: number | null }>>(
+      '/director/strategy/workflows',
+      { query: { limit } },
+    ),
+
+  status: (id: string) => request<StrategyWorkflowState>(`/director/strategy/workflows/${id}`),
+
+  decide: (id: string, payload: { action: string; reason?: string }) =>
+    request<{ workflow_id: string; state: StrategyWorkflowState }>(
+      `/director/strategy/workflows/${id}/decision`,
+      {
+        method: 'POST',
+        body: payload,
+        idempotencyKey: newIdempotencyKey('strategy-workflow-decision'),
+      },
+    ),
 }

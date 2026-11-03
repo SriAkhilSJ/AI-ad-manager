@@ -138,7 +138,7 @@ def main() -> int:
     http = Http(args.base_url)
     harness = Harness(http)
 
-    print("\nCrusor AI Marketing Director — Phase 1 + 2 + 3A acceptance\n" + "=" * 68)
+    print("\nCrusor AI Marketing Director — Phase 1 + 2 + 3A + 3B acceptance\n" + "=" * 68)
     wait_for_api(http)
 
     # ---- 1. backend starts ------------------------------------------------
@@ -1339,6 +1339,380 @@ def main() -> int:
         )
 
     harness.check("35. Phase 1 and Phase 2 acceptance is intact", c35)
+
+    # ------------------------------------------------------------------ #
+    # Phase 3B — Creative Studio
+    # ------------------------------------------------------------------ #
+    creative = "/creative-studio"
+    state: dict[str, object] = {}
+
+    def c36() -> str:
+        """A brief can be created from a content version without touching the content."""
+        _, brand = http.call("GET", "/brand/active", expect=200)
+        tag = uuid.uuid4().hex[:8]
+        _, item = http.call(
+            "POST",
+            "/content",
+            {
+                "brand_profile_id": brand["id"],
+                "title": f"Phase 3B acceptance creative {tag}",
+                "platform": "instagram",
+                "body": "Crusor AI is an AI-powered IDE. Build and ship with ease.\n\n"
+                "This copy must survive brief generation unchanged.",
+                "headline": "Build and Ship with Ease",
+                "call_to_action": "Try it.",
+            },
+            expect=201,
+        )
+        _, detail = http.call("GET", f"/content/{item['id']}", expect=200)
+        version_id = detail["current_version_id"]
+        before_body = detail["current_version"]["body"]
+
+        _, brief = http.call(
+            "POST",
+            f"{creative}/briefs",
+            {
+                "content_version_id": version_id,
+                "asset_type": "image",
+                "creative_direction": "developer at a terminal, charcoal frame",
+            },
+            expect=(200, 201),
+        )
+        required = [
+            "content_version_id",
+            "platform",
+            "asset_type",
+            "creative_objective",
+            "visual_concept",
+            "scenes",
+            "subjects",
+            "background",
+            "lighting",
+            "composition",
+            "colour_palette",
+            "typography",
+            "brand_asset_requirements",
+            "image_prompt",
+            "negative_prompt",
+            "aspect_ratio",
+            "resolution",
+            "reference_assets",
+            "validation_constraints",
+        ]
+        missing = [key for key in required if key not in brief]
+        assert not missing, f"brief is missing {missing}"
+        assert brief["content_version_id"] == version_id
+        assert brief["validation_constraints"]["human_visual_review_required"] is True
+
+        _, after = http.call("GET", f"/content/{item['id']}", expect=200)
+        assert after["current_version"]["body"] == before_body, "brief generation edited content"
+        assert after["status"] == detail["status"]
+
+        state.update(item_id=item["id"], version_id=version_id, brief=brief)
+        return (
+            f"brief v{brief['version_number']} for {brief['platform']} "
+            f"({brief['aspect_ratio']}, {brief['resolution']}); content body byte-identical "
+            f"afterwards"
+        )
+
+    harness.check("36. Creative briefs are creatable from a content version", c36)
+
+    def c37() -> str:
+        """A mock image job executes and its asset is stored with verified bytes."""
+        brief = state["brief"]
+        _, job = http.call(
+            "POST",
+            f"{creative}/jobs",
+            {"brief_id": brief["id"], "parameters": {"seed": 3}},
+            expect=201,
+        )
+        assert job["status"] == "succeeded", job
+        assert job["provider"] == "mock" and job["is_mock"] is True
+        assert job["external_job_id"].startswith("mock:")
+        assert job["cost_actual_usd"] == 0.0
+        _, replay = http.call(
+            "POST",
+            f"{creative}/jobs",
+            {"brief_id": brief["id"], "parameters": {"seed": 3}},
+            expect=(200, 201),
+        )
+        assert replay["id"] == job["id"], "the same request created a second job"
+        state.update(job=job)
+        return (
+            f"job {job['external_job_id'][:34]}… succeeded on {job['provider']} at "
+            f"${job['cost_actual_usd']}; replay returned the same job"
+        )
+
+    harness.check("37. Mock image generation executes and is idempotent", c37)
+
+    def c38() -> str:
+        """Video generation is honest: a poster frame, not an encoded video."""
+        brief = state["brief"]
+        _, video_brief = http.call(
+            "POST",
+            f"{creative}/briefs",
+            {
+                "content_version_id": state["version_id"],
+                "asset_type": "video",
+                "force_new_version": True,
+            },
+            expect=(200, 201),
+        )
+        _, caps = http.call("GET", f"{creative}/capabilities", expect=200)
+        assert caps["video_playback"] == "poster_only", caps
+        _, job = http.call(
+            "POST", f"{creative}/jobs", {"brief_id": video_brief["id"]}, expect=201
+        )
+        # The mock simulates a short render for video, so poll it to completion
+        # rather than assuming a submit returns a finished job.
+        initial = job["status"]
+        deadline = time.time() + 30
+        while job["status"] not in ("succeeded", "failed", "timed_out") and time.time() < deadline:
+            time.sleep(1.2)
+            _, job = http.call("POST", f"{creative}/jobs/{job['id']}/poll", expect=200)
+        assert job["status"] == "succeeded", job
+        _, asset = http.call("GET", f"{creative}/assets/{job['asset_id']}", expect=200)
+        assert asset["mime_type"] == "image/png"
+        assert asset["metadata_json"]["video_playback"] == "poster_only"
+        assert asset["metadata_json"]["encoded_video"] in (None, False)
+        return (
+            f"video brief asked {video_brief['duration_seconds']}s at "
+            f"{video_brief['aspect_ratio']}; submitted as {initial}, polled to "
+            f"{job['status']}; provider returned a {asset['width']}x{asset['height']} poster and "
+            f"declared poster_only"
+        )
+
+    harness.check("38. Video generation is labelled a poster, not a video", c38)
+
+    def c39() -> str:
+        """Jobs persist with status, parameters and an audit trail."""
+        job = state["job"]
+        _, listed = http.call("GET", f"{creative}/jobs", expect=200)
+        assert any(row["id"] == job["id"] for row in listed), "job missing from history"
+        _, fetched = http.call("GET", f"{creative}/jobs/{job['id']}", expect=200)
+        assert fetched["status"] == "succeeded"
+        assert fetched["parameters"]["seed"] == 3
+        assert fetched["audit_trail"], "no audit trail recorded"
+        events = [event.get("event") for event in fetched["audit_trail"]]
+        assert "succeeded" in events, events
+        _, polled = http.call("POST", f"{creative}/jobs/{job['id']}/poll", expect=200)
+        assert polled["status"] == "succeeded"
+        return f"job persisted with {len(events)} audit events: {events[:4]}"
+
+    harness.check("39. Job lifecycle is persisted with an audit trail", c39)
+
+    def c40() -> str:
+        """The asset is stored, retrievable, and its metadata matches the bytes."""
+        job = state["job"]
+        _, asset = http.call("GET", f"{creative}/assets/{job['asset_id']}", expect=200)
+        url = f"{args.base_url}{API}{creative}/assets/{asset['id']}/bytes"
+        request = urllib.request.Request(
+            url, headers={"authorization": f"Bearer {http.token}"}
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            raw = response.read()
+            content_type = response.headers.get("content-type")
+        digest = __import__("hashlib").sha256(raw).hexdigest()
+        assert digest == asset["checksum"], "stored bytes do not match the checksum"
+        assert len(raw) == asset["size_bytes"], "stored size does not match"
+        assert raw.startswith(b"\x89PNG\r\n\x1a\n"), "not a PNG"
+        assert content_type.startswith("image/png")
+        assert asset["detected_mime"] == asset["mime_type"] == "image/png"
+        assert asset["width"] and asset["height"]
+        assert asset["storage_key"] and asset["asset_version"] == 1
+        state.update(asset=asset)
+        return (
+            f"{asset['width']}x{asset['height']} {asset['mime_type']}, "
+            f"{len(raw)} bytes, sha256 {digest[:16]}… verified against the record"
+        )
+
+    harness.check("40. Assets are stored and retrievable byte-for-byte", c40)
+
+    def c41() -> str:
+        """Creative QA runs, produces a verdict, and declares what it did not do."""
+        asset = state["asset"]
+        _, result = http.call(
+            "POST", f"{creative}/assets/{asset['id']}/validate", {}, expect=200
+        )
+        report = result["qa_report"]
+        assert report["verdict"] in {
+            "pass",
+            "pass_with_warnings",
+            "needs_revision",
+            "blocked",
+        }, report["verdict"]
+        assert report["performed_checks"] > 5
+        assert report["visual_verification"] == "not_performed"
+        assert report["human_visual_review_required"] is True
+        rules = {check["rule"]: check for check in report["checks"]}
+        assert rules["text_readability"]["performed"] is False, "claimed OCR it does not have"
+        assert rules["checksum_matches"]["performed"] is True
+        assert rules["pixel_analysis"]["performed"] is True
+        return (
+            f"verdict {report['verdict']} score {report['score']}; "
+            f"{report['performed_checks']} performed / {report['not_performed_checks']} not "
+            f"performed; pixel sample {report['pixel_stats']['sampled_pixels']} px"
+        )
+
+    harness.check("41. Creative QA works and does not claim visual verification", c41)
+
+    def c42() -> str:
+        """Content version, brief version and asset version are linked."""
+        asset = state["asset"]
+        brief = state["brief"]
+        assert asset["content_version_id"] == state["version_id"]
+        assert asset["content_item_id"] == state["item_id"]
+        assert asset["brief_id"] == brief["id"]
+        assert asset["brief_version"] == brief["version_number"]
+        assert asset["generation_job_id"] == state["job"]["id"]
+        assert asset["selected"] is False, "a generated asset selected itself"
+        _, versions = http.call(
+            "GET", f"{creative}/assets?content_item_id={state['item_id']}", expect=200
+        )
+        assert len(versions) >= 1
+        return (
+            f"asset v{asset['asset_version']} → brief v{asset['brief_version']} → content "
+            f"version {str(asset['content_version_id'])[:8]} → job {str(asset['generation_job_id'])[:8]}"
+        )
+
+    harness.check("42. Content, brief and asset versions are linked", c42)
+
+    def c43() -> str:
+        """Approval covers content + brief + asset; changing the asset voids it."""
+        asset = state["asset"]
+        _, selected = http.call(
+            "POST", f"{creative}/assets/{asset['id']}/select", {}, expect=200
+        )
+        assert selected["asset"]["selected"] is True
+        http.call(
+            "POST", f"/content/{state['item_id']}/transition", {"action": "submit"}, expect=200
+        )
+        _, approved = http.call(
+            "POST",
+            f"/content/{state['item_id']}/transition",
+            {"action": "approve", "reason": "acceptance: approved with creative"},
+            expect=200,
+        )
+        assert approved["has_valid_approval"] is True
+        _, records = http.call("GET", f"/content/{state['item_id']}/approvals", expect=200)
+        approval = next(row for row in records if row["action"] == "approve")
+        assert approval["creative_asset_id"] == asset["id"], approval
+        assert approval["creative_brief_id"] == state["brief"]["id"]
+        assert approval["creative_brief_version"] == state["brief"]["version_number"]
+        assert approval["creative_asset_version"] == asset["asset_version"]
+        assert approval["creative_binding_hash"]
+
+        _, second = http.call(
+            "POST",
+            f"{creative}/jobs",
+            {"brief_id": state["brief"]["id"], "parameters": {"seed": 11}},
+            expect=(200, 201),
+        )
+        _, swapped = http.call(
+            "POST", f"{creative}/assets/{second['asset_id']}/select", {}, expect=200
+        )
+        assert swapped["invalidated_approvals"] >= 1, swapped
+        _, after = http.call("GET", f"/content/{state['item_id']}", expect=200)
+        assert after["has_valid_approval"] is False, "approval survived a selection change"
+        return (
+            f"approval bound asset {asset['id'][:8]} v{asset['asset_version']} + brief "
+            f"v{approval['creative_brief_version']} + content version; selecting another asset "
+            f"invalidated {swapped['invalidated_approvals']} approval(s)"
+        )
+
+    harness.check("43. Approval binds content + brief + asset and enforces invalidation", c43)
+
+    def c44() -> str:
+        """Flow is reported unavailable and paid generation is off."""
+        _, flow = http.call("GET", f"{creative}/flow/status", expect=200)
+        assert flow["available"] is False
+        assert flow["enabled"] is False
+        assert flow["source_found"] is False
+        assert len(flow["required_information"]) >= 5
+        _, caps = http.call("GET", f"{creative}/capabilities", expect=200)
+        assert caps["provider"] == "mock" and caps["is_mock"] is True
+        assert caps["billable"] is False
+        assert caps["live_generation_enabled"] is False
+        assert caps["paid_generation_enabled"] is False
+        _, status = http.call("GET", "/system/status", expect=200)
+        creative_status = status["creative"]
+        assert creative_status["paid_generation_enabled"] is False
+        assert creative_status["flow_connector"]["status"] == "not_available"
+        return (
+            f"flow {flow['status']} (source_found={flow['source_found']}, "
+            f"{len(flow['required_information'])} requirements); provider {caps['provider']} "
+            f"billable={caps['billable']} paid={caps['paid_generation_enabled']}"
+        )
+
+    harness.check("44. Flow is not falsely active and paid generation is disabled", c44)
+
+    def c45() -> str:
+        """There is no publishing or external scheduling route for creative."""
+        attempts = [
+            ("POST", "/publishing"),
+            ("POST", "/publish"),
+            ("POST", f"{creative}/publish"),
+            ("POST", f"{creative}/assets/{state['asset']['id']}/publish"),
+            ("POST", f"{creative}/schedule"),
+        ]
+        codes = []
+        for method, path in attempts:
+            status, _ = http.call(method, path, {})
+            assert status in (404, 405), f"{path} -> {status}"
+            codes.append(f"{path}={status}")
+        _, caps = http.call("GET", f"{creative}/capabilities", expect=200)
+        assert caps["publishing_available"] is False
+        assert caps["external_scheduling"] is False
+        return "; ".join(codes)
+
+    harness.check("45. No creative publishing or scheduling endpoint exists", c45)
+
+    def c46() -> str:
+        """The shipped frontend bundle contains the Creative Studio surfaces."""
+        bundle = sorted((REPO_ROOT / "frontend" / "dist" / "assets").glob("index-*.js"))
+        assert bundle, "no production bundle — run `npm run build`"
+        js = bundle[-1].read_text(errors="ignore")
+        wanted = [
+            "Generation centre",
+            "Brief editor",
+            "Asset library",
+            "Mock generation is active",
+            "Google Flow is not available",
+            "not performed",
+        ]
+        missing = [needle for needle in wanted if needle not in js]
+        assert not missing, f"bundle is missing {missing}"
+        size_kb = bundle[-1].stat().st_size / 1024
+        return f"{bundle[-1].name} ({size_kb:.1f} kB) contains all {len(wanted)} studio strings"
+
+    harness.check("46. Frontend build ships the Creative Studio UI", c46)
+
+    def c47() -> str:
+        """Phase 1, 2, 2.5, 2.6 and 3A acceptance still holds in this same run."""
+        def number(name: str) -> int | None:
+            head = name.split(".")[0].strip()
+            digits = "".join(ch for ch in head if ch.isdigit())
+            return int(digits) if digits else None
+
+        earlier = [name for name, ok, _ in harness.results if (number(name) or 99) < 47]
+        failed = [
+            name
+            for name, ok, _ in harness.results
+            if (number(name) or 99) < 47 and not ok
+        ]
+        assert not failed, f"earlier criteria regressed: {failed}"
+        assert len(earlier) >= 40, f"expected the full earlier suite, ran {len(earlier)}"
+        _, overview = http.call("GET", f"{creative}/overview", expect=200)
+        assert overview["total_assets"] >= 2
+        assert overview["mock_assets"] >= 2
+        assert overview["provider"] == "mock"
+        return (
+            f"all {len(earlier)} earlier checks still pass; creative overview reports "
+            f"{overview['total_assets']} assets ({overview['mock_assets']} mock), "
+            f"{overview['succeeded_jobs']} succeeded jobs"
+        )
+
+    harness.check("47. Phase 1/2/2.5/2.6/3A acceptance is intact", c47)
 
 
     # ---- summary ---------------------------------------------------------

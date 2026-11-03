@@ -16,6 +16,7 @@ import { ContentStudioPage } from './pages/ContentStudio'
 import { ContentDraftEditorPage } from './pages/ContentDraftEditor'
 import { ContentDetailPage } from './pages/ContentDetail'
 import { CreativeStudioPage } from './pages/CreativeStudio'
+import { CreativeAssetDetailPage } from './pages/creative/CreativeAssetDetail'
 import { ApprovalCentrePage } from './pages/ApprovalCentre'
 import { SocialAccountsPage } from './pages/SocialAccounts'
 import { AnalyticsPage } from './pages/Analytics'
@@ -82,6 +83,7 @@ export default function App() {
         <Route path="content-studio/items/:id" element={<ContentDraftEditorPage />} />
         <Route path="content/:id" element={<ContentDetailPage />} />
         <Route path="creative" element={<CreativeStudioPage />} />
+        <Route path="creative/assets/:assetId" element={<CreativeAssetDetailPage />} />
         <Route path="approvals" element={<ApprovalCentrePage />} />
         <Route path="social" element={<SocialAccountsPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />

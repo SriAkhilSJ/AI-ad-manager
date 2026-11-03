@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -47,6 +47,20 @@ class ApprovalRecord(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     # Fingerprint of the payload that was approved; compared at publish time.
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # --- Phase 3B creative binding -------------------------------------------
+    # An approval authorises a *combination*: this content version, this creative
+    # brief version, and this selected asset version. Storing the trio means a
+    # later swap of any element invalidates the approval explicitly rather than by
+    # coincidence of a content hash.
+    creative_brief_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("creative_briefs.id", ondelete="SET NULL"), nullable=True
+    )
+    creative_brief_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    creative_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        GUID(), ForeignKey("creative_assets.id", ondelete="SET NULL"), nullable=True
+    )
+    creative_asset_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    creative_binding_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     invalidated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

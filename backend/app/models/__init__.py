@@ -20,7 +20,14 @@ from app.models.content_plan import (
     SlotStatus,
     ValidationVerdict,
 )
-from app.models.creative import CreativeAsset, CreativeAssetStatus, CreativeKind
+from app.models.creative import (
+    CreativeAsset,
+    CreativeAssetStatus,
+    CreativeKind,
+    CreativeValidationStatus,
+)
+from app.models.creative_brief import CreativeBrief
+from app.models.creative_job import CreativeGenerationJob
 from app.models.idempotency import IdempotencyKey
 from app.models.memory import MarketingMemory, MemoryKind
 from app.models.research import (

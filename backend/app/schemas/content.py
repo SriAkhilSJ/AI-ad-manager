@@ -100,6 +100,12 @@ class ApprovalRecordOut(BaseModel):
     invalidated_at: datetime | None
     invalidated_reason: str
     created_at: datetime
+    # Phase 3B: which creative combination this approval actually covers.
+    creative_brief_id: uuid.UUID | None = None
+    creative_brief_version: int | None = None
+    creative_asset_id: uuid.UUID | None = None
+    creative_asset_version: int | None = None
+    creative_binding_hash: str = ""
 
 
 class PublishRequest(BaseModel):

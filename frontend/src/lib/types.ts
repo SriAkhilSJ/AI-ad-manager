@@ -1034,3 +1034,224 @@ export interface CalendarView {
   external_scheduling: false
   publishing_available: false
 }
+
+// ----------------------------------------------------------- Phase 3B studio
+export type CreativeValidationStatus =
+  | 'unverified'
+  | 'pass'
+  | 'pass_with_warnings'
+  | 'needs_revision'
+  | 'blocked'
+
+export interface CreativeQaCheck {
+  rule: string
+  category: string
+  passed: boolean
+  performed: boolean
+  automated: boolean
+  detail: string
+}
+
+export interface CreativeQaIssue {
+  rule: string
+  category: string
+  severity: 'blocking' | 'needs_revision' | 'warning' | 'note' | string
+  message: string
+  evidence: string
+  suggestion: string
+}
+
+export interface CreativeQaReport {
+  verdict: CreativeValidationStatus | string
+  score: number
+  checks: CreativeQaCheck[]
+  issues: CreativeQaIssue[]
+  blocking_count: number
+  warning_count: number
+  performed_checks: number
+  not_performed_checks: number
+  pixel_stats: Record<string, number> | null
+  visual_verification: 'performed' | 'not_performed' | string
+  human_visual_review_required: boolean
+  note: string
+}
+
+export interface CreativeBrief {
+  id: string
+  brand_profile_id: string
+  campaign_id: string | null
+  content_item_id: string | null
+  content_version_id: string | null
+  content_hash: string
+  platform: string
+  asset_type: 'image' | 'video' | string
+  version_number: number
+  brief_hash: string
+  creative_objective: string
+  visual_concept: string
+  scenes: string[]
+  subjects: string[]
+  background: string
+  lighting: string
+  composition: string[]
+  colour_palette: Record<string, string>
+  typography: string[]
+  brand_asset_requirements: string[]
+  image_prompt: string
+  negative_prompt: string[]
+  aspect_ratio: string
+  resolution: string
+  duration_seconds: number | null
+  reference_assets: string[]
+  validation_constraints: Record<string, unknown>
+  generation_metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface CreativeJob {
+  id: string
+  brief_id: string
+  brief_version: number
+  brand_profile_id: string | null
+  campaign_id: string | null
+  content_item_id: string | null
+  content_version_id: string | null
+  provider: string
+  job_type: string
+  status: string
+  is_mock: boolean
+  external_job_id: string
+  submitted_prompt: string
+  parameters: Record<string, unknown>
+  asset_id: string | null
+  attempts: number
+  timeout_seconds: number
+  cost_estimate_usd: number | null
+  cost_actual_usd: number | null
+  error_code: string
+  error_message: string
+  error_retryable: boolean
+  ambiguous: boolean
+  audit_trail: Array<Record<string, unknown>>
+  created_at: string
+  submitted_at: string | null
+  completed_at: string | null
+}
+
+export interface CreativeAssetStudio {
+  id: string
+  brand_profile_id: string | null
+  campaign_id: string | null
+  content_item_id: string | null
+  content_version_id: string | null
+  brief_id: string | null
+  brief_version: number
+  generation_job_id: string | null
+  provider: string
+  kind: string
+  status: string
+  filename: string
+  mime_type: string
+  detected_mime: string
+  size_bytes: number
+  width: number | null
+  height: number | null
+  duration_seconds: number | null
+  aspect_ratio: string
+  checksum: string
+  storage_key: string | null
+  public_url: string | null
+  is_mock: boolean
+  selected: boolean
+  asset_version: number
+  supersedes_asset_id: string | null
+  root_asset_id: string | null
+  prompt: string
+  validation_status: string
+  qa_report: CreativeQaReport | Record<string, never>
+  validation_checked_at: string | null
+  metadata_json: Record<string, unknown>
+  created_at: string
+  mock_label: string | null
+}
+
+export interface CreativeAssetDetail extends CreativeAssetStudio {
+  approval_status: string
+  approval: Record<string, unknown> | null
+  brief: CreativeBrief | null
+  job: CreativeJob | null
+  versions: Array<{
+    id: string
+    asset_version: number
+    status: string
+    checksum: string
+    size_bytes: number
+    width: number | null
+    height: number | null
+    is_mock: boolean
+    created_at: string
+    selected: boolean
+  }>
+}
+
+export interface CreativeOverview {
+  total_assets: number
+  mock_assets: number
+  pending_jobs: number
+  failed_jobs: number
+  succeeded_jobs: number
+  approved_assets: number
+  needs_review_assets: number
+  by_campaign: Record<string, number>
+  by_platform: Record<string, number>
+  by_validation: Record<string, number>
+  provider: string
+  is_mock_provider: boolean
+  paid_generation_enabled: boolean
+  flow_connector: {
+    status: string
+    source_found: boolean
+    required_information: string[]
+  }
+  storage: Record<string, unknown>
+}
+
+export interface CreativeCapabilities {
+  provider: string
+  available: boolean
+  is_mock: boolean
+  billable: boolean
+  requires_authorization: boolean
+  live_generation_enabled: boolean
+  supports_image: boolean
+  supports_video: boolean
+  video_playback: string
+  notes: string[]
+  storage: Record<string, unknown>
+  paid_generation_enabled: boolean
+  campaign_budget_usd: number
+  max_upload_bytes: number
+  publishing_available: boolean
+  external_scheduling: boolean
+  qa_note: string
+  flow_connector: {
+    status: string
+    available: boolean
+    enabled: boolean
+    source_found: boolean
+    required_information: string[]
+    note: string
+  }
+}
+
+export interface CreativeFlowStatus {
+  integration: string
+  status: string
+  available: boolean
+  enabled: boolean
+  configured: boolean
+  source_found: boolean
+  adapters_implemented: string[]
+  required_information: string[]
+  note: string
+}

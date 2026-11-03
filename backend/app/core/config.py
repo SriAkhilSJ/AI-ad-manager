@@ -136,6 +136,30 @@ class Settings(BaseSettings):
     #: Per-platform spec overrides, e.g. {"x": {"body_max_chars": 280}}.
     content_platform_overrides_json: dict[str, Any] = Field(default_factory=dict)
 
+    # ---- Phase 3B creative generation ------------------------------------
+    #: Who produces images and video. ``mock`` (the default) is deterministic and
+    #: free: it renders a real PNG frame and never calls a model. ``flow`` selects
+    #: the Google Flow adapter, which fails closed because the Connector source is
+    #: not available. ``disabled`` refuses every generation attempt.
+    creative_provider: Literal["mock", "flow", "disabled"] = "mock"
+    #: Real generation spends money. It stays off until a founder authorises it in
+    #: configuration *and* a provider with verified pricing exists.
+    creative_allow_paid_generation: bool = False
+    #: Per-campaign creative budget. Zero blocks every billable generation; it is
+    #: never treated as unlimited (Phase 2.6 rule, applied to images as well).
+    creative_campaign_budget_usd: float = 0.0
+    #: Longest edge the mock renderer draws. Kept modest so tests stay fast.
+    creative_mock_max_dimension: int = 960
+    #: A job that has not reported back within this window is marked TIMED_OUT.
+    creative_job_timeout_seconds: int = 300
+    creative_job_max_attempts: int = 2
+    #: Upload guard rails. The declared Content-Type is never trusted; the bytes are
+    #: sniffed and the size is enforced before anything is written.
+    creative_max_upload_bytes: int = 25 * 1024 * 1024
+    #: Verified USD price per generation, keyed by ``image`` / ``video``. An empty
+    #: map means "price unknown", which blocks paid generation instead of costing $0.
+    creative_pricing_json: dict[str, Any] = Field(default_factory=dict)
+
     # Budget envelopes. The brief's default is "initially equivalent to ₹5 for a
     # simple task"; USD is the accounting currency, so the default is a
     # configurable conversion of that intention, not a hardcoded guess.
@@ -190,7 +214,9 @@ class Settings(BaseSettings):
     token_vault_backend: Literal["none", "s3", "external"] = "none"
 
     # ------------------------------------------------------------------ #
-    @field_validator("llm_task_routing_json", "llm_pricing_json", mode="before")
+    @field_validator(
+        "llm_task_routing_json", "llm_pricing_json", "creative_pricing_json", mode="before"
+    )
     @classmethod
     def _parse_dict_json(cls, value: Any) -> Any:
         if value in (None, "", b""):

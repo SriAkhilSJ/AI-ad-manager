@@ -34,6 +34,14 @@ import type {
   GeneratedItem,
   ContentPlan,
   ContentPlanDetail,
+  CreativeAssetDetail,
+  CreativeAssetStudio,
+  CreativeBrief,
+  CreativeCapabilities,
+  CreativeFlowStatus,
+  CreativeJob,
+  CreativeOverview,
+  CreativeQaReport,
   PlanRequest,
   VariantSet,
   ValidationResult,
@@ -647,4 +655,126 @@ export const strategyDirectorApi = {
         idempotencyKey: newIdempotencyKey('strategy-workflow-decision'),
       },
     ),
+}
+
+// --------------------------------------------------- creative studio (3B)
+export const creativeStudioApi = {
+  overview: () => request<CreativeOverview>('/creative-studio/overview'),
+  capabilities: () => request<CreativeCapabilities>('/creative-studio/capabilities'),
+  flowStatus: () => request<CreativeFlowStatus>('/creative-studio/flow/status'),
+
+  briefs: (query?: { content_item_id?: string; content_version_id?: string; limit?: number }) =>
+    request<CreativeBrief[]>('/creative-studio/briefs', { query }),
+  brief: (id: string) => request<CreativeBrief>(`/creative-studio/briefs/${id}`),
+  createBrief: (
+    payload: {
+      content_version_id?: string
+      content_item_id?: string
+      asset_type?: 'image' | 'video'
+      creative_direction?: string
+      aspect_ratio?: string
+      duration_seconds?: number
+      strategy_reference?: string
+      force_new_version?: boolean
+    },
+    idempotencyKey?: string,
+  ) =>
+    request<CreativeBrief>('/creative-studio/briefs', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey,
+    }),
+
+  jobs: (query?: { brief_id?: string; content_item_id?: string; status?: string; limit?: number }) =>
+    request<CreativeJob[]>('/creative-studio/jobs', { query }),
+  job: (id: string) => request<CreativeJob>(`/creative-studio/jobs/${id}`),
+  submitJob: (
+    payload: {
+      brief_id: string
+      job_type?: 'image' | 'video'
+      parameters?: Record<string, unknown>
+      auto_advance?: boolean
+    },
+    idempotencyKey?: string,
+  ) =>
+    request<CreativeJob>('/creative-studio/jobs', {
+      method: 'POST',
+      body: payload,
+      idempotencyKey,
+    }),
+  pollJob: (id: string) =>
+    request<CreativeJob>(`/creative-studio/jobs/${id}/poll`, { method: 'POST' }),
+  retryJob: (id: string, authorizeAmbiguous = false) =>
+    request<CreativeJob>(`/creative-studio/jobs/${id}/retry`, {
+      method: 'POST',
+      body: { authorize_ambiguous: authorizeAmbiguous },
+    }),
+  cancelJob: (id: string) =>
+    request<CreativeJob>(`/creative-studio/jobs/${id}/cancel`, { method: 'POST' }),
+
+  assets: (query?: {
+    campaign_id?: string
+    content_item_id?: string
+    platform?: string
+    kind?: string
+    validation_status?: string
+    q?: string
+    limit?: number
+  }) => request<CreativeAssetStudio[]>('/creative-studio/assets', { query }),
+  asset: (id: string) => request<CreativeAssetDetail>(`/creative-studio/assets/${id}`),
+  validateAsset: (id: string) =>
+    request<{ asset: CreativeAssetStudio; qa_report: CreativeQaReport }>(
+      `/creative-studio/assets/${id}/validate`,
+      { method: 'POST' },
+    ),
+  selectAsset: (id: string, contentVersionId?: string) =>
+    request<{
+      asset: CreativeAssetStudio
+      invalidated_approvals: number
+      message: string
+    }>(`/creative-studio/assets/${id}/select`, {
+      method: 'POST',
+      body: { content_version_id: contentVersionId ?? null },
+    }),
+  uploadAsset: (params: {
+    file: File
+    contentItemId?: string
+    campaignId?: string
+    kind?: string
+  }): Promise<CreativeAssetStudio> => {
+    const form = new FormData()
+    form.append('file', params.file)
+    if (params.contentItemId) form.append('content_item_id', params.contentItemId)
+    if (params.campaignId) form.append('campaign_id', params.campaignId)
+    if (params.kind) form.append('kind', params.kind)
+    return request<CreativeAssetStudio>('/creative-studio/assets/upload', {
+      method: 'POST',
+      formData: form,
+    })
+  },
+  uploadVersion: (assetId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<{
+      asset: CreativeAssetStudio
+      invalidated_approvals: number
+      message: string
+    }>(`/creative-studio/assets/${assetId}/versions`, { method: 'POST', formData: form })
+  },
+  /** Authenticated URL for the raw bytes; the token travels as a query-free header
+   *  via the app shell, so the UI uses `objectUrl` instead for <img> previews. */
+  bytes: async (assetId: string): Promise<Blob> => {
+    const token = getToken()
+    const response = await fetch(`${API_BASE}/creative-studio/assets/${assetId}/bytes`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!response.ok) {
+      throw new ApiError(
+        response.status,
+        'asset_bytes_failed',
+        `Could not load the stored bytes (${response.status}).`,
+      )
+    }
+    return response.blob()
+  },
 }

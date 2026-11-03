@@ -144,6 +144,13 @@ class ApprovalService:
         current_hash = await self.current_content_hash(item)
         if record.content_hash and current_hash and record.content_hash != current_hash:
             return None
+        # Phase 3B: the selected creative must still be the one that was approved.
+        binding = await self.creative_binding(item)
+        approved_asset = str(record.creative_asset_id) if record.creative_asset_id else ""
+        if approved_asset != binding["asset_id"]:
+            return None
+        if (record.creative_binding_hash or "") and record.creative_binding_hash != binding["hash"]:
+            return None
         return record
 
     async def require_valid_approval(
@@ -191,6 +198,67 @@ class ApprovalService:
                     "issues": row.issues[:5],
                 },
             )
+
+    async def selected_creative(self, item: ContentItem) -> "CreativeAsset | None":
+        """The creative asset currently bound to the item's live content version.
+
+        Phase 3B: an approval covers a *combination* — content version, creative
+        brief version and selected asset version. This is the lookup that makes the
+        last two checkable.
+        """
+        from app.models.creative import CreativeAssetStatus
+
+        if item.current_version_id is None:
+            return None
+        stmt = (
+            select(CreativeAsset)
+            .where(
+                CreativeAsset.content_item_id == item.id,
+                CreativeAsset.content_version_id == item.current_version_id,
+                CreativeAsset.selected.is_(True),
+                CreativeAsset.status == CreativeAssetStatus.READY.value,
+            )
+            .order_by(CreativeAsset.asset_version.desc())
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def creative_binding(self, item: ContentItem) -> dict[str, Any]:
+        """Everything an approval must pin, in comparable string form."""
+        asset = await self.selected_creative(item)
+        if asset is None:
+            return {
+                "brief_id": "",
+                "brief_version": 0,
+                "asset_id": "",
+                "asset_version": 0,
+                "asset_checksum": "",
+                "hash": "",
+            }
+        binding = {
+            "brief_id": str(asset.brief_id) if asset.brief_id else "",
+            "brief_version": int(asset.brief_version or 0),
+            "asset_id": str(asset.id),
+            "asset_version": int(asset.asset_version or 0),
+            "asset_checksum": asset.checksum or "",
+        }
+        import hashlib
+        import json as _json
+
+        binding["hash"] = hashlib.sha256(
+            _json.dumps(
+                {
+                    "content_version_id": str(item.current_version_id or ""),
+                    "brief_id": binding["brief_id"],
+                    "brief_version": binding["brief_version"],
+                    "asset_id": binding["asset_id"],
+                    "asset_version": binding["asset_version"],
+                    "asset_checksum": binding["asset_checksum"],
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return binding
 
     async def current_content_hash(self, item: ContentItem) -> str:
         """Hash of the item's *current* version (authoritative, DB-backed).
@@ -276,6 +344,16 @@ class ApprovalService:
 
         record: ApprovalRecord | None = None
         persisted_action = PERSISTED_ACTION.get(action)
+        creative = await self.creative_binding(item) if persisted_action == (
+            ApprovalAction.APPROVE.value
+        ) else {
+            "brief_id": "",
+            "brief_version": 0,
+            "asset_id": "",
+            "asset_version": 0,
+            "asset_checksum": "",
+            "hash": "",
+        }
         if persisted_action is not None:
             record = ApprovalRecord(
                 content_item_id=item.id,
@@ -287,6 +365,15 @@ class ApprovalService:
                 content_hash=await self.current_content_hash(item),
                 idempotency_key=idempotency_key,
                 request_payload=metadata or {},
+                creative_brief_id=(
+                    uuid.UUID(creative["brief_id"]) if creative["brief_id"] else None
+                ),
+                creative_brief_version=creative["brief_version"] or None,
+                creative_asset_id=(
+                    uuid.UUID(creative["asset_id"]) if creative["asset_id"] else None
+                ),
+                creative_asset_version=creative["asset_version"] or None,
+                creative_binding_hash=creative["hash"],
             )
             self.session.add(record)
             if persisted_action == ApprovalAction.APPROVE.value:

@@ -15,6 +15,7 @@ from sqlalchemy import func, select, text
 
 from app.api.deps import DB
 from app.core.config import get_settings
+from app.creative.providers import creative_provider_status
 from app.director.graph import graph_topology
 from app.llm.gateway import gateway_status
 from app.models.user import User
@@ -114,6 +115,21 @@ async def status(session: DB) -> dict[str, Any]:
             "note": (
                 "Strategy generation is available and produces founder-approvable drafts. "
                 "Nothing is published, sent, spent or applied to a live account."
+            ),
+        },
+        "creative": {
+            **creative_provider_status(settings),
+            "allow_paid_generation": bool(settings.creative_allow_paid_generation),
+            "campaign_budget_usd": settings.creative_campaign_budget_usd,
+            "pricing_configured": bool(settings.creative_pricing_json),
+            "job_timeout_seconds": settings.creative_job_timeout_seconds,
+            "max_upload_bytes": settings.creative_max_upload_bytes,
+            "publishing_available": False,
+            "external_scheduling": False,
+            "note": (
+                "Creative Studio produces briefs, mock generation jobs and stored assets. "
+                "Mock assets are synthetic frames, not model-generated artwork. Automated "
+                "QA never claims visual verification; a human must review every asset."
             ),
         },
         "publishing": {

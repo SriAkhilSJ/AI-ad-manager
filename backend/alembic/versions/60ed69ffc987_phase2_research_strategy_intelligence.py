@@ -130,7 +130,7 @@ def upgrade() -> None:
     sa.Column('id', app.db.types.GUID(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.CheckConstraint("status in ('queued','running','succeeded','partial','failed','budget_exceeded','cancelled')", name=op.f('ck_research_projects_research_project_status_valid')),
+    sa.CheckConstraint("status in ('queued','running','succeeded','partial','failed','budget_exceeded','cancelled','unavailable')", name=op.f('ck_research_projects_research_project_status_valid')),
     sa.CheckConstraint('max_cost_usd >= 0 and estimated_cost_usd >= 0 and actual_cost_usd >= 0', name=op.f('ck_research_projects_research_project_costs_non_negative')),
     sa.ForeignKeyConstraint(['brand_profile_id'], ['brand_profiles.id'], name=op.f('fk_research_projects_brand_profile_id_brand_profiles'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], name=op.f('fk_research_projects_created_by_users'), ondelete='SET NULL'),

@@ -64,6 +64,7 @@ class ResearchStatus(str, enum.Enum):
     FAILED = "failed"
     BUDGET_EXCEEDED = "budget_exceeded"
     CANCELLED = "cancelled"
+    UNAVAILABLE = "unavailable"
 
     @classmethod
     def values(cls) -> list[str]:
@@ -71,7 +72,8 @@ class ResearchStatus(str, enum.Enum):
 
 
 RESEARCH_STATUS_SQL = (
-    "('queued','running','succeeded','partial','failed','budget_exceeded','cancelled')"
+    "('queued','running','succeeded','partial','failed','budget_exceeded','cancelled',"
+    "'unavailable')"
 )
 
 # The nine research categories the brief requires the agent to cover.

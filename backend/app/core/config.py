@@ -108,7 +108,7 @@ class Settings(BaseSettings):
 
     # Bounded execution for research/strategy runs
     research_max_iterations: int = 6
-    research_max_tool_calls: int = 24
+    research_max_tool_calls: int = 28
     research_max_wall_seconds: int = 240
     strategy_max_iterations: int = 4
     strategy_max_tool_calls: int = 12

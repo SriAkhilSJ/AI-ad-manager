@@ -256,6 +256,11 @@ class BaseAgent(Generic[InputT, OutputT]):
         schema: type[BaseModel],
         schema_name: str,
         purpose: str,
+        task_class: str = "",
+        budget: Any = None,
+        cancel: Any = None,
+        dedupe: Any = None,
+        dedupe_key: str = "",
     ) -> tuple[BaseModel, bool]:
         """Attempt a structured model call.
 
@@ -267,15 +272,15 @@ class BaseAgent(Generic[InputT, OutputT]):
         gateway = ctx.gateway
         if gateway is None:
             return schema.model_construct(), False
-        budget = min(self.max_tokens, ctx.remaining_tokens)
-        if budget <= 0:
+        token_budget = min(self.max_tokens, ctx.remaining_tokens)
+        if token_budget <= 0:
             return schema.model_construct(), False
         request = LLMRequest(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             schema_name=schema_name,
             json_schema=schema.model_json_schema(),
-            max_tokens=budget,
+            max_tokens=token_budget,
             purpose=purpose,
         )
         try:
@@ -284,13 +289,22 @@ class BaseAgent(Generic[InputT, OutputT]):
                 request=request,
                 agent_run_id=ctx.run.id if ctx.run else None,
                 attempt=ctx.run.attempts if ctx.run else 1,
-                model_budget_tokens=budget,
+                model_budget_tokens=token_budget,
+                task_class=task_class,
+                budget=budget,
+                cancel=cancel,
+                dedupe=dedupe,
+                dedupe_key=dedupe_key,
             )
         except ProviderUnavailable:
             return schema.model_construct(), False
         except BudgetExceeded as exc:
             raise AgentBudgetExceeded(str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - cancellation must propagate
+            from app.core.errors import CancelledProblem
+
+            if isinstance(exc, CancelledProblem):
+                raise
             logger.warning("llm_call_failed", agent=self.name, error=type(exc).__name__)
             return schema.model_construct(), False
 

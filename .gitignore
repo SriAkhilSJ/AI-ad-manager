@@ -1,0 +1,36 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ---- Node ----
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# ---- Local data / artifacts ----
+.data/
+backend/.data/
+*.sqlite3
+*.db
+storage/
+
+# ---- Secrets ----
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---- OS / editors ----
+.DS_Store
+.idea/
+.vscode/
+*.log

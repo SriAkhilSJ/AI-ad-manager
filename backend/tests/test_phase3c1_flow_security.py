@@ -1645,3 +1645,16 @@ async def test_companion_degrades_and_backs_off_on_transport_errors():
     assert companion.status.consecutive_failures >= 1
     assert companion.status.state.value in {"degraded", "stopped"}
     assert companion.status.last_error == "ConnectError"
+
+
+def test_companion_main_returns_configuration_error_without_starting(monkeypatch):
+    """The module entry point fails closed before creating listeners when unconfigured."""
+    from app.flow import companion as companion_module
+
+    def fail_configuration():
+        raise ValueError("missing companion pairing configuration")
+
+    monkeypatch.setattr(companion_module, "companion_from_settings", fail_configuration)
+    monkeypatch.setattr(companion_module.logging, "basicConfig", lambda **_kwargs: None)
+
+    assert companion_module.main() == 2

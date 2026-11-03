@@ -1904,6 +1904,43 @@ def main() -> int:
 
     harness.check("52. Flow generation is blocked by the approval gate", c52)
 
+    def c53() -> str:
+        """The documented companion module entry point fails closed when unpaired."""
+        env = os.environ.copy()
+        for name in (
+            "FLOW_COMPANION_ID",
+            "FLOW_COMPANION_SECRET",
+            "FLOW_PAIRING_ID",
+            "FLOW_PAIRING_SECRET",
+        ):
+            env[name] = ""
+        # Same import path the rest of the harness uses, whether or not the caller
+        # exported PYTHONPATH.
+        env["PYTHONPATH"] = "."
+
+        completed = subprocess.run(
+            [sys.executable, "-m", "app.flow.companion"],
+            cwd=BACKEND,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        output = f"{completed.stdout}\n{completed.stderr}"
+        assert completed.returncode == 2, (
+            f"expected safe configuration exit 2, got {completed.returncode}: {output[-2000:]}"
+        )
+        assert "flow_companion_misconfigured:" in output, output[-2000:]
+        assert "flow_bridge_started" not in output, "unpaired CLI must not start a listener"
+        return (
+            "python -m app.flow.companion exits 2 for missing pairing credentials "
+            "before starting listeners"
+        )
+
+    harness.check("53. The local companion has a safe executable module entry point", c53)
+
 
     # ---- summary ---------------------------------------------------------
     passed = sum(1 for _, ok, _ in harness.results if ok)

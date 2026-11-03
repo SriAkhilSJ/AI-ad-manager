@@ -297,6 +297,10 @@ STOPPED → STARTING → UNPAIRED ──extension hello──► PAIRED
   bridge's own limits. No secret, no fingerprint, no token.
 * **Error normalisation:** upstream codes are mapped to a fixed vocabulary; a command that fails is
   reported with `dispatched` so the coordinator can distinguish safe-to-retry from ambiguous.
+* **Executable entry point:** `python -m app.flow.companion` is the documented way to run it. It
+  validates its credentials *before* the bridge is created, so an unpaired or misconfigured companion
+  logs `flow_companion_misconfigured:` and exits `2` without ever opening a listener
+  (`test_companion_main_returns_configuration_error_without_starting`, acceptance criterion 53).
 
 ---
 
@@ -341,8 +345,8 @@ dispatch: the best an agent can obtain in Phase 3C.1 is an authorisation decisio
 | Approval binding + gate | `backend/app/services/flow_approval.py`, `backend/app/services/approval.py` |
 | Companion registry, export service, status payload | `backend/app/services/flow_gateway.py` |
 | HTTP surface | `backend/app/api/v1/flow.py`, `backend/app/schemas/flow.py`, `system.py`, `router.py` |
-| Tests (94) | `backend/tests/test_phase3c1_flow_security.py` |
-| Acceptance checks 48–52 | `scripts/acceptance.py` |
+| Tests (95) | `backend/tests/test_phase3c1_flow_security.py` |
+| Acceptance checks 48–53 | `scripts/acceptance.py` |
 
 Settings added (all default to *off*): `FLOW_BRIDGE_ENABLED=false`, `FLOW_BRIDGE_HOST=127.0.0.1`,
 `FLOW_BRIDGE_PORT=8793`, `FLOW_BRIDGE_WS_PORT=8794`, `FLOW_PAIRING_ID`, `FLOW_PAIRING_SECRET`,
@@ -358,12 +362,12 @@ indexes and nullable columns, so a Phase 3B deployment can roll forward without 
 ## 12. Test results
 
 ```
-backend/tests/test_phase3c1_flow_security.py   94 passed
-backend/tests (full suite)                     711 passed, 0 failed
-scripts/acceptance.py                          53/53 criteria passed
+backend/tests/test_phase3c1_flow_security.py   95 passed
+backend/tests (full suite)                     712 passed, 0 failed
+scripts/acceptance.py                          54/54 criteria passed
 ```
 
-The 94 tests cover, in eight groups: transport hardening (binding, auth, Host/Origin, limits,
+The 95 tests cover, in eight groups: transport hardening (binding, auth, Host/Origin, limits,
 redaction, WS handshake, session supersede), the allowlist (every denied command, unknown names,
 case and injection attempts), generation safety (one attempt, idempotency, single live job, ambiguous
 submit, foreign job id, stale tile, export checksums), the approval gate (missing, 3B-era, invalidated,
@@ -371,13 +375,16 @@ mismatch, no bypass), the export contract (verified, checksum mismatch, wrong ty
 reuse, foreign companion), the HTTP surface (status, capabilities, companion lifecycle, generation
 refusal, tickets), the local companion (dial-out only, allowlisted execution, generation refusal,
 credential rejection without retry, backoff), and leak checks (route surface, response bodies, log
-redaction, error normalisation).
+redaction, error normalisation). One further test pins the module entry point: a configuration failure
+returns exit code `2` without constructing a bridge.
 
-Acceptance criteria 48–52 add: the status payload is honest and generation is off; dangerous commands
+Acceptance criteria 48–53 add: the status payload is honest and generation is off; dangerous commands
 are denied by name and absent from the OpenAPI surface; a **real os-level bridge** binds `127.0.0.1`
 (read from `getsockname()`), refuses `0.0.0.0`, and answers `401 / 403 / 421 / 413 / 503` correctly;
-unauthenticated companion callers are rejected on every companion route; and a real generation request
-is refused by the approval gate.
+unauthenticated companion callers are rejected on every companion route; a real generation request is
+refused by the approval gate; and `python -m app.flow.companion` exits `2` with a
+`flow_companion_misconfigured:` log line when its pairing credentials are missing, proving the CLI
+fails closed before it can listen.
 
 No paid model was called. No image or video was generated. No Google account was connected. Every
 "media" byte in the tests is a PNG built in-process by `encode_png()`.

@@ -29,12 +29,25 @@ import asyncio
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit
 
+from pathlib import Path
+
 from app.flow import protocol as proto
+from app.flow.installed_artifact import (
+    LAYOUT_TREE,
+    SUPPORTED_DIGEST_ALGORITHMS,
+    SUPPORTED_LAYOUTS,
+    InstalledArtifactVerifier,
+    InstallationSpec,
+    MeasurementError,
+    MeasurementPolicy,
+    measure_components,
+)
 from app.flow.provenance import (
     COMPONENT_COMPANION,
     COMPONENT_EXTENSION,
@@ -49,11 +62,16 @@ from app.flow.provenance import (
     verify_provenance,
 )
 from app.flow.trust import (
+    ARTIFACT_MEASUREMENT_FAILED,
+    INSTALLED_ARTIFACT_NOT_FOUND,
+    MEASUREMENT_STALE,
+    RELEASE_ANCHOR_MISSING,
     AttestationRejected,
     ChallengeStore,
     ComponentReport,
     SessionAttestation,
     TrustDecision,
+    TrustEvidence,
     TrustRegistry,
     UNVERIFIED,
     UntrustedArtifact,
@@ -62,6 +80,7 @@ from app.flow.trust import (
     empty_decision,
     evaluate_live_generation_guard,
     get_registry,
+    spending_controls_from_settings,
     trust_status_payload,
 )
 from app.flow.coordinator import (
@@ -118,6 +137,15 @@ class BridgeConfigError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ComponentInstallSpec:
+    """Where one executable component is installed. Explicit, never discovered."""
+
+    component: str
+    root: str
+    layout: str = "versioned"
+
+
+@dataclass(frozen=True)
 class BridgeConfig:
     host: str = "127.0.0.1"
     http_port: int = 8793
@@ -152,7 +180,15 @@ class BridgeConfig:
     require_installed_measurement: bool = False
     challenge_ttl_seconds: float = 120.0
     measurement_freshness_seconds: float = 300.0
-    required_components: tuple[str, ...] = (COMPONENT_EXTENSION,)
+    #: Extra components the operator requires on top of the signed manifest. Empty
+    #: means the manifest alone decides; the Chrome extension is always required.
+    required_components: tuple[str, ...] = ()
+    #: Phase 3C.2.3 — the local process measures these roots itself. ``companion_id``
+    #: is the companion's own identity, never the extension's, so a challenge cannot
+    #: be satisfied by the party it is meant to check.
+    companion_id: str = ""
+    install_components: tuple[ComponentInstallSpec, ...] = ()
+    digest_algorithm: str = "sha256-tree-runtime-v1"
 
     def validate(self) -> "BridgeConfig":
         assert_loopback_bind(self.host)  # raises LoopbackBindError
@@ -170,6 +206,43 @@ class BridgeConfig:
                 "Installed-artifact measurement requires a trusted release anchor: a "
                 "measurement with nothing to compare against proves nothing."
             )
+        if self.require_installed_measurement and not self.install_components:
+            raise BridgeConfigError(
+                "Installed-artifact measurement requires at least one configured "
+                "installation root."
+            )
+        if self.digest_algorithm not in SUPPORTED_DIGEST_ALGORITHMS:
+            raise BridgeConfigError(
+                f"Unsupported artifact digest algorithm {self.digest_algorithm!r}; "
+                f"choose one of {', '.join(SUPPORTED_DIGEST_ALGORITHMS)}."
+            )
+        seen_components: set[str] = set()
+        for spec in self.install_components:
+            if spec.component not in (COMPONENT_EXTENSION, COMPONENT_MCP, COMPONENT_COMPANION):
+                raise BridgeConfigError(
+                    f"Unknown component {spec.component!r} has an installation root; only "
+                    "known components can be measured."
+                )
+            if spec.component in seen_components:
+                raise BridgeConfigError(
+                    f"Component {spec.component!r} has more than one installation root."
+                )
+            seen_components.add(spec.component)
+            if spec.layout not in SUPPORTED_LAYOUTS:
+                raise BridgeConfigError(
+                    f"Component {spec.component!r} declares unsupported layout "
+                    f"{spec.layout!r}; supported layouts are "
+                    f"{', '.join(SUPPORTED_LAYOUTS)}."
+                )
+            if spec.component == COMPONENT_EXTENSION and spec.layout == LAYOUT_TREE:
+                raise BridgeConfigError(
+                    "The Chrome extension cannot be measured as a plain tree: it has a "
+                    "Chrome identity, so use the versioned or directory layout."
+                )
+            if not str(spec.root or "").strip():
+                raise BridgeConfigError(
+                    f"Component {spec.component!r} has an empty installation root."
+                )
         if self.live_generation_enabled and not self.trust_policy.has_anchor:
             # Turning on live generation without an independent artifact anchor
             # would let an unverified build spend real money.
@@ -205,10 +278,11 @@ class ExtensionSession:
     authenticated: bool = False
     busy: bool = False
     provenance: ExtensionProvenance | None = None
-    provenance_trusted: bool = False
+    hello_claim_verified: bool = False
     provenance_state: str = "UNVERIFIED"
     trust: TrustDecision | None = None
     challenge_id: str = ""
+    measurement_task: Any = None
     claims_well_formed: bool = False
     components_consistent: bool = False
     artifact_integrity_verified: bool = False
@@ -227,7 +301,7 @@ class ExtensionSession:
             "mcp_version": self.provenance.mcp_version if self.provenance else "",
             "source_commit": self.provenance.source_commit if self.provenance else "",
             "build_id": self.provenance.build_id if self.provenance else "",
-            "provenance_trusted": self.provenance_trusted,
+            "hello_claim_verified": self.hello_claim_verified,
             "flow_tab_present": self.flow_tab_present,
             "authenticated": self.authenticated,
             "busy": self.busy,
@@ -253,8 +327,9 @@ class BridgeTransport:
 class FlowBridge:
     """Loopback-only bridge with authentication, limits and an allowlist."""
 
-    def __init__(self, config: BridgeConfig) -> None:
+    def __init__(self, config: BridgeConfig, settings: Any = None) -> None:
         self.config = config.validate()
+        self.settings = settings if settings is not None else _default_settings()
         install_redaction(logger, [config.pairing_secret])
         self.policy = config.origins
         #: Rebuilt after binding so an ephemeral port (0) is still validated
@@ -289,9 +364,20 @@ class FlowBridge:
         self.challenges = ChallengeStore(ttl_seconds=config.challenge_ttl_seconds)
         self.trust_registry = get_registry()
         self.last_trust: TrustDecision | None = None
+        # Phase 3C.2.3 §9: one ledger, built from real configuration, shared by the
+        # guard (which reports whether a control exists) and the coordinator (which
+        # reserves against it before a command exists).
+        settings = self.settings
+        from app.services.flow_budget import flow_ledger_from_settings
+
+        self.budget_ledger = flow_ledger_from_settings(settings)
+        self.spending_controls = spending_controls_from_settings(
+            settings, ledger=self.budget_ledger
+        )
         self.coordinator = GenerationCoordinator(
             BridgeTransport(self),
             live_generation_enabled=False,  # Phase 3C.1: never live.
+            budget_ledger=self.budget_ledger,
             max_live_jobs=config.max_live_jobs,
             command_timeout=config.command_timeout,
             export_max_bytes=config.export_max_bytes,
@@ -689,7 +775,13 @@ class FlowBridge:
                         "max_live_jobs": self.config.max_live_jobs,
                         "allowed_commands": list(proto.ALLOWED_COMMANDS),
                         "live_generation": False,
-                        "provenance_trusted": session.provenance_trusted,
+                        # Nothing has been measured at ack time, so the session is
+                        # not trusted: `provenance_trusted` is false no matter what
+                        # the HELLO claimed. The claim-level verdict is reported
+                        # under its own narrower name.
+                        "provenance_trusted": False,
+                        "trust_state": "UNVERIFIED",
+                        "hello_digest_claim_verified": session.hello_claim_verified,
                         "provenance_state": session.provenance_state,
                         # Three separate facts, reported separately: a well-formed
                         # HELLO is not an integrity check, and the ack must not imply
@@ -699,16 +791,32 @@ class FlowBridge:
                         "artifact_integrity_verified": session.artifact_integrity_verified,
                         "trust_anchor": session.anchor_source,
                         "measurement_required": self._measurement_required(),
-                        "required_components": list(self.config.required_components),
+                        "required_components": list(self.effective_required_components()),
                         "provenance": session.provenance.as_dict() if session.provenance else {},
                     }
                 )
             )
-            await self._issue_challenge(session)
+            if self._measurement_required():
+                # Runs off the handshake: measuring a real installation can take
+                # seconds, and the session must not be trusted while it is pending.
+                session.measurement_task = asyncio.create_task(self.measure_session(session))
+            else:
+                self.trust_registry.record(
+                    session.session_id, empty_decision("measurement_not_required")
+                )
             await self._ws_loop(session)
         except Exception:  # noqa: BLE001
             logger.exception("flow_bridge_ws_error")
         finally:
+            # A measurement belongs to the session that requested it. If the socket
+            # has gone, stop it: a decision recorded after disconnect would describe
+            # a session that no longer exists.
+            if session.measurement_task is not None and not session.measurement_task.done():
+                session.measurement_task.cancel()
+                try:
+                    await session.measurement_task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
             for future in session.pending.values():
                 if not future.done():
                     future.set_exception(ConnectionError("extension disconnected"))
@@ -778,7 +886,7 @@ class FlowBridge:
         session.extension_version = hello.extension_version
         session.flow_tab_present = hello.flow_tab_present
         session.provenance = provenance
-        session.provenance_trusted = report.trusted
+        session.hello_claim_verified = report.trusted
         session.provenance_warnings = report.warnings
         session.provenance_state = report.trust_state
         session.claims_well_formed = report.claims_well_formed
@@ -800,10 +908,6 @@ class FlowBridge:
                 session.flow_tab_present = bool(payload.get("flow_tab_present"))
                 session.busy = bool(payload.get("busy"))
                 continue
-            if kind == "verification_report":
-                if not await self._apply_verification_report(session, payload):
-                    return
-                continue
             if kind == "result":
                 envelope_id = str(payload.get("id") or "")
                 future = session.pending.pop(envelope_id, None)
@@ -819,118 +923,142 @@ class FlowBridge:
 
     # --------------------------------------------------- installed artifact
     def _measurement_required(self) -> bool:
-        """A measurement is required when an anchor exists and either the operator
-        asked for one or the policy makes it mandatory."""
-        return bool(self.config.require_installed_measurement and self.config.trust_policy.has_anchor)
+        """Measurement is required when an anchor exists and the operator asked for it."""
+        return bool(
+            self.config.require_installed_measurement and self.config.trust_policy.has_anchor
+        )
 
     def current_trust(self) -> TrustDecision:
-        """The session's trust decision, or an explicit UNVERIFIED one."""
-        decision = self.session.trust if self.session else None
-        return decision or empty_decision("no_session")
+        """The session's decision, re-evaluated for freshness at the moment of use.
 
-    async def _issue_challenge(self, session: ExtensionSession) -> None:
-        if not self._measurement_required():
-            return
-        attestation = SessionAttestation(
-            store=self.challenges,
-            anchor=resolve_trust_anchor(self.config.trust_policy),
-            required_components=tuple(self.config.required_components),
-            freshness_seconds=self.config.measurement_freshness_seconds,
-        )
-        try:
-            challenge = attestation.issue(
-                session_id=session.session_id,
-                companion_id=session.extension_id or "",
-                extension_id=session.extension_id or "",
-            )
-        except AttestationRejected as exc:
-            self.trust_registry.audit("flow.trust.challenge_refused", code=exc.code)
-            return
-        session.challenge_id = challenge.challenge_id
-        frame = proto.VerificationChallengeMessage(
-            challenge_id=challenge.challenge_id,
-            nonce=challenge.nonce,
-            session_id=challenge.session_id,
-            expires_at=proto.iso(
-                datetime.fromtimestamp(challenge.expires_at, tz=timezone.utc)
-            ),
-            expected_extension_id=attestation.anchor.extension_id,
-            required_components=list(self.config.required_components),
-        )
-        self.trust_registry.audit(
-            "flow.trust.measurement_started",
-            session_id=session.session_id,
-            challenge_id=challenge.challenge_id,
-        )
-        try:
-            await session.websocket.send(frame.model_dump_json())
-        except Exception:  # noqa: BLE001 - the socket may already be gone
-            logger.info("flow_bridge_challenge_send_failed session=%s", session.session_id)
+        A decision that was VERIFIED five minutes ago is not evidence now, and an
+        open WebSocket does not refresh it. The expired copy is recorded so the
+        revocation is visible in the audit trail and in status.
+        """
+        decision = self.session.trust if self.session else self.last_trust
+        if decision is None:
+            return empty_decision("no_measurement")
+        if decision.trusted and not decision.is_fresh():
+            expired = decision.expired_copy()
+            self.trust_registry.record(decision.session_id or "expired", expired)
+            if self.session is not None and self.session.trust is decision:
+                self.session.trust = expired
+            self.last_trust = expired
+            return expired
+        return decision
 
-    async def _apply_verification_report(
-        self, session: ExtensionSession, payload: dict[str, Any]
-    ) -> bool:
-        """Validate a challenge-bound measurement. Returns False to close the socket."""
-        try:
-            message = proto.VerificationReportMessage.model_validate(payload)
-        except Exception:  # noqa: BLE001
-            self.stats["ws_rejected_measurement"] += 1
-            await self._close_measurement(session, "malformed verification report")
-            return False
+    async def measure_session(self, session: ExtensionSession) -> TrustDecision:
+        """Measure the configured installation roots **in this process**.
 
-        submission = VerificationSubmission(
-            challenge_id=message.challenge_id,
-            nonce=message.nonce,
-            components=tuple(
-                ComponentReport(
-                    name=item.name,
-                    digest=item.digest,
-                    extension_id=item.extension_id,
-                    version=item.version,
-                    measurement_id=item.measurement_id,
-                    measured_at=item.measured_at,
-                    limitations=tuple(item.limitations),
-                    checks=tuple(item.checks),
-                )
-                for item in message.components
-            ),
-        )
+        This is the production path: the local companion hosts this bridge, so the
+        trusted process is the one holding the challenge and reading the filesystem.
+        The extension socket is not consulted, cannot submit a digest, and never
+        learns the nonce — a measurement it fabricates has nowhere to enter.
+        """
         anchor = resolve_trust_anchor(self.config.trust_policy)
         attestation = SessionAttestation(
             store=self.challenges,
             anchor=anchor,
             required_components=tuple(self.config.required_components),
             freshness_seconds=self.config.measurement_freshness_seconds,
+            measurement_source="local_companion",
+        )
+        if not self._measurement_required():
+            decision = empty_decision("measurement_not_required")
+            return self._record_decision(session, decision)
+
+        try:
+            challenge = attestation.issue(
+                session_id=session.session_id,
+                companion_id=self.config.companion_id,
+                extension_id=session.extension_id or "",
+            )
+        except AttestationRejected as exc:
+            decision = empty_decision(exc.code, state=RELEASE_ANCHOR_MISSING)
+            return self._record_decision(session, decision)
+
+        session.challenge_id = challenge.challenge_id
+        self.trust_registry.audit(
+            "flow.trust.measurement_started",
+            session_id=session.session_id,
+            companion_id=self.config.companion_id,
+            challenge_id=challenge.challenge_id,
+        )
+
+        try:
+            reports = await asyncio.to_thread(self._measure_locally, session, anchor)
+        except MeasurementError as exc:
+            state = (
+                INSTALLED_ARTIFACT_NOT_FOUND
+                if exc.code
+                in {
+                    "installed_artifact_not_found",
+                    "installed_artifact_not_configured",
+                    "component_not_configured",
+                }
+                else ARTIFACT_MEASUREMENT_FAILED
+            )
+            self.trust_registry.audit(
+                "flow.trust.measurement_failed",
+                session_id=session.session_id,
+                code=exc.code,
+            )
+            decision = TrustDecision(
+                state=state,
+                evidence=TrustEvidence(
+                    supported_protocol=True,
+                    claims_well_formed=True,
+                    components_consistent=True,
+                    release_anchor_valid=anchor.signature_verified,
+                    installed_artifact_measured=False,
+                    measurement_source="local_companion",
+                    failures=(exc.code,),
+                ),
+                reasons=(exc.code,),
+                anchor_source=anchor.source,
+                session_id=session.session_id,
+            )
+            return self._record_decision(session, decision)
+        except Exception as exc:  # noqa: BLE001 - an unexpected failure must not trust
+            logger.exception("flow_bridge_measurement_crashed")
+            decision = empty_decision(
+                f"measurement_error:{type(exc).__name__}", state=ARTIFACT_MEASUREMENT_FAILED
+            )
+            return self._record_decision(session, decision)
+
+        submission = VerificationSubmission(
+            challenge_id=challenge.challenge_id,
+            nonce=challenge.nonce,
+            components=reports,
         )
         provenance = session.provenance
         try:
             evidence = attestation.accept(
                 submission,
                 session_id=session.session_id,
-                companion_id=session.extension_id or "",
+                companion_id=self.config.companion_id,
                 hello_extension_id=session.extension_id or "",
                 hello_version=session.extension_version or "",
                 hello_digest=(provenance.package_sha256 if provenance else "") or "",
             )
         except AttestationRejected as exc:
-            self.stats["ws_rejected_measurement"] += 1
             self.trust_registry.audit(
-                f"flow.trust.{exc.code}",
-                session_id=session.session_id,
-                challenge_id=message.challenge_id,
+                f"flow.trust.{exc.code}", session_id=session.session_id
             )
-            self.trust_registry.record(
-                session.session_id,
-                empty_decision(exc.code),
-            )
-            await self._close_measurement(session, exc.code)
-            return False
+            decision = empty_decision(exc.code, state=ARTIFACT_MEASUREMENT_FAILED)
+            return self._record_decision(session, decision)
 
-        report = verify_provenance(
-            provenance,
-            policy=self.config.trust_policy,
-            allow_component_drift=self.config.allow_component_drift,
-        ) if provenance else None
+        report = None
+        if provenance is not None:
+            try:
+                report = verify_provenance(
+                    provenance,
+                    policy=self.config.trust_policy,
+                    allow_component_drift=self.config.allow_component_drift,
+                )
+            except ProvenanceRejected:
+                report = None
+
         extension = submission.component(COMPONENT_EXTENSION)
         decision = aggregate_trust(
             source_gate_status=self._source_gate_status(),
@@ -942,18 +1070,76 @@ class FlowBridge:
             measured_version=extension.version if extension else "",
             measured_digest=extension.digest if extension else "",
         )
-        session.trust = self.trust_registry.record(session.session_id, decision)
-        self.last_trust = session.trust
+        self._record_decision(session, decision)
         logger.info(
-            "flow_bridge_measurement state=%s session=%s measured=%s",
+            "flow_bridge_measurement state=%s session=%s digest=%s files=%s",
             decision.state,
             session.session_id,
             (decision.measured_digest or "-")[:16],
+            extension.file_count if extension else 0,
         )
-        return True
+        return session.trust
+
+    def _measure_locally(
+        self, session: ExtensionSession, anchor: TrustAnchor
+    ) -> tuple[ComponentReport, ...]:
+        """Read the configured roots. Runs off the event loop; the caller awaits it.
+
+        A required component with no configured root is a *failure*, not a skip: the
+        signed manifest decides what is required, and configuration may only add.
+        """
+        required = {
+            COMPONENT_EXTENSION,
+            *anchor.required_components,
+            *self.config.required_components,
+        }
+        specs = {
+            spec.component: InstallationSpec(
+                root=Path(spec.root).expanduser(),
+                layout=spec.layout,
+                expected_extension_id=(
+                    (anchor.extension_id or session.extension_id)
+                    if spec.component == COMPONENT_EXTENSION
+                    else ""
+                ),
+                expected_version=(anchor.release or session.extension_version)
+                if spec.component == COMPONENT_EXTENSION
+                else "",
+                policy=MeasurementPolicy(digest_algorithm=self.config.digest_algorithm),
+            )
+            for spec in self.config.install_components
+        }
+        missing = sorted(required - set(specs))
+        if missing:
+            raise MeasurementError(
+                "component_not_configured",
+                "A required component has no configured installation root.",
+                details={"components": missing},
+            )
+        for name in sorted(required & set(specs)):
+            if name != COMPONENT_EXTENSION and not specs[name].expected_extension_id:
+                # Directory layouts derive identity from the manifest key; nothing
+                # else to assert here, but the digest must still match the release.
+                pass
+        frames = measure_components({name: specs[name] for name in sorted(required & set(specs))})
+        return tuple(
+            ComponentReport(
+                name=frame["name"],
+                digest=frame["digest"],
+                extension_id=frame["extension_id"],
+                version=frame["version"],
+                measurement_id=frame["measurement_id"],
+                measured_at=frame["measured_at"],
+                file_count=frame["file_count"],
+                digest_algorithm=frame.get("digest_algorithm", self.config.digest_algorithm),
+                limitations=tuple(frame.get("limitations") or ()),
+                checks=tuple(frame.get("checks") or ()),
+            )
+            for frame in frames
+        )
 
     def _source_gate_status(self) -> str:
-        """The upstream gate, read once per decision. Absent source is the norm."""
+        """The upstream gate, read at decision time. Absent source is the norm."""
         try:
             from app.flow.source_gate import evaluate_source_gate
 
@@ -961,18 +1147,38 @@ class FlowBridge:
         except Exception:  # noqa: BLE001 - a gate that cannot answer must not authorize
             return "LICENSING_BLOCKED"
 
-    async def _close_measurement(self, session: ExtensionSession, reason: str) -> None:
-        try:
-            await session.websocket.close(
-                code=proto.WS_CLOSE_MEASUREMENT, reason=reason[:120]
-            )
-        except Exception:  # noqa: BLE001
-            pass
-
     # ------------------------------------------------------------- dispatch
     @property
     def paired(self) -> bool:
         return bool(self.session and self.session.authenticated)
+
+    def effective_required_components(self) -> tuple[str, ...]:
+        """Manifest floor plus operator additions, in one list."""
+        anchor = resolve_trust_anchor(self.config.trust_policy)
+        merged: list[str] = [COMPONENT_EXTENSION]
+        for name in (*anchor.required_components, *self.config.required_components):
+            if name not in merged:
+                merged.append(name)
+        return tuple(merged)
+
+    def _record_decision(
+        self, session: ExtensionSession, decision: TrustDecision
+    ) -> TrustDecision:
+        """Record a decision against the session *and* as the latest one."""
+        recorded = self.trust_registry.record(session.session_id, decision)
+        session.trust = recorded
+        self.last_trust = recorded
+        return recorded
+
+    def _session_decision(self) -> TrustDecision:
+        if self.session is not None and self.session.trust is not None:
+            return self.session.trust
+        return self.last_trust if self.last_trust is not None else empty_decision("no_session")
+
+    def session_trusted(self) -> bool:
+        """Trusted *and* still fresh — the question the snapshot must answer."""
+        decision = self._session_decision()
+        return bool(decision.trusted) and decision.is_fresh(time.time())
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -987,7 +1193,12 @@ class FlowBridge:
             "paired": self.paired,
             "session": self.session.as_dict() if self.session else None,
             "provenance": self.session.provenance.as_dict() if self.session and self.session.provenance else None,
-            "provenance_trusted": bool(self.session and self.session.provenance_trusted),
+            # Session-level trust: a measurement was made here, it matched a signed
+            # release, and it is still inside its validity window.
+            "provenance_trusted": self.session_trusted(),
+            "hello_digest_claim_verified": bool(
+                self.session and self.session.hello_claim_verified
+            ),
             "provenance_state": self.session.provenance_state if self.session else "UNVERIFIED",
             "claims_well_formed": bool(self.session and self.session.claims_well_formed),
             "components_consistent": bool(self.session and self.session.components_consistent),
@@ -1086,8 +1297,8 @@ class FlowBridge:
             source_gate_status=self._source_gate_status(),
             decision=self.current_trust(),
             approval_binding=approval_binding,
-            budget_configured=True,
-            idempotency_enforced=True,
+            budget_controls=self.spending_controls,
+            idempotency_enforced=self.coordinator.idempotency_enforced,
         )
         if not guard.allowed:
             raise UntrustedArtifact(
@@ -1108,6 +1319,16 @@ class _HttpProtocolError(Exception):
         super().__init__(code)
         self.status = status
         self.code = code
+
+
+def _default_settings() -> Any:
+    """Settings for the spend-control check when a bridge is built without them."""
+    try:
+        from app.core.config import get_settings
+
+        return get_settings()
+    except Exception:  # noqa: BLE001 - no settings means no verified budget
+        return None
 
 
 def bridge_config_from_settings(settings: Any) -> BridgeConfig:
@@ -1142,12 +1363,43 @@ def bridge_config_from_settings(settings: Any) -> BridgeConfig:
         measurement_freshness_seconds=float(
             getattr(settings, "flow_measurement_freshness_seconds", 300.0)
         ),
+        # Extra requirements only. An empty setting means "the signed manifest
+        # decides"; naming a narrower list here is a declaration, and it fails
+        # closed rather than quietly shrinking what gets measured.
         required_components=tuple(
             item.strip()
-            for item in str(getattr(settings, "flow_required_components", "chrome_extension")).split(",")
+            for item in str(getattr(settings, "flow_required_components", "")).split(",")
             if item.strip()
-        ) or ("chrome_extension",),
+        ),
+        companion_id=getattr(settings, "flow_companion_id", "") or "",
+        install_components=_install_components_from_settings(settings),
+        digest_algorithm=getattr(settings, "flow_artifact_digest_algorithm", "sha256-tree-runtime-v1"),
     )
+
+
+def _install_components_from_settings(settings: Any) -> tuple[ComponentInstallSpec, ...]:
+    """Map the installation settings onto explicit, per-component specs.
+
+    Nothing is inferred: a component with no configured root simply has no spec, and
+    a component that is *required* without a spec fails the measurement instead of
+    being skipped.
+    """
+    specs: list[ComponentInstallSpec] = []
+    entries = (
+        (COMPONENT_EXTENSION, getattr(settings, "flow_extension_install_root", ""),
+         getattr(settings, "flow_extension_install_layout", "versioned")),
+        (COMPONENT_MCP, getattr(settings, "flow_mcp_install_root", ""),
+         getattr(settings, "flow_mcp_install_layout", "tree")),
+        (COMPONENT_COMPANION, getattr(settings, "flow_companion_install_root", ""),
+         getattr(settings, "flow_companion_install_layout", "tree")),
+    )
+    for name, root, layout in entries:
+        if not str(root or "").strip():
+            continue
+        specs.append(
+            ComponentInstallSpec(component=name, root=str(root).strip(), layout=str(layout or "").strip())
+        )
+    return tuple(specs)
 
 
 async def run_bridge(config: BridgeConfig | None = None) -> None:

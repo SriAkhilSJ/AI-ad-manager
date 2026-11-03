@@ -138,6 +138,10 @@ RELEASE_MANIFEST_SCHEMA = "crusor.flow.release.v2"
 RELEASE_MANIFEST_SCHEMA_V1 = "crusor.flow.release.v1"
 SUPPORTED_MANIFEST_SCHEMAS = (RELEASE_MANIFEST_SCHEMA, RELEASE_MANIFEST_SCHEMA_V1)
 
+#: Digest profiles a signed release may name for component identity. A runtime
+#: measurement must never be compared against a source-licensing digest.
+RUNTIME_DIGEST_ALGORITHMS = ("sha256-tree-runtime-v1", "sha256-tree-v1")
+
 #: Executable components a signed release may identify individually.
 COMPONENT_EXTENSION = "chrome_extension"
 COMPONENT_MCP = "mcp_server"
@@ -173,6 +177,7 @@ class TrustAnchor:
     released_at: str = ""
     components: dict[str, str] = field(default_factory=dict)
     required_components: tuple[str, ...] = ()
+    digest_algorithm: str = ""
 
     @property
     def present(self) -> bool:
@@ -182,6 +187,29 @@ class TrustAnchor:
     def identifies_components(self) -> bool:
         """A live integration needs per-component identity, not one blob digest."""
         return bool(self.components) and COMPONENT_EXTENSION in self.components
+
+    @property
+    def live_capable(self) -> bool:
+        """Whether this anchor can ever support a live generation decision.
+
+        Phase 3C.2.3: a signature proves authenticity of a *release*, not that every
+        executable was identified. Live capability needs the v2 schema, a verified
+        signature, individually identified components, and a digest for every
+        component the release itself marks required. A pinned single digest and a
+        legacy v1 manifest are readable but never live-capable.
+        """
+        if self.source != ANCHOR_MANIFEST:
+            return False
+        if self.schema != RELEASE_MANIFEST_SCHEMA:
+            return False
+        if not self.signature_verified or not self.identifies_components:
+            return False
+        if not SHA256.match(self.artifact_sha256):
+            return False
+        for name in self.required_components:
+            if not SHA256.match(self.components.get(name, "")):
+                return False
+        return True
 
     def digest_for(self, component: str) -> str:
         if component == COMPONENT_EXTENSION and not self.components:
@@ -204,6 +232,8 @@ class TrustAnchor:
             "components": dict(self.components),
             "required_components": list(self.required_components),
             "identifies_components": self.identifies_components,
+            "live_capable": self.live_capable,
+            "digest_algorithm": self.digest_algorithm,
         }
 
 
@@ -323,6 +353,13 @@ def verify_release_manifest(path: str | Path, public_key_b64: str) -> TrustAncho
     release = document.get("release") if isinstance(document.get("release"), dict) else {}
     schema = str(document.get("schema") or "")
 
+    declared_algorithm = str(document.get("digest_algorithm") or "").strip()
+    if declared_algorithm and declared_algorithm not in RUNTIME_DIGEST_ALGORITHMS:
+        raise ProvenanceRejected(
+            f"The signed manifest declares an unsupported digest algorithm "
+            f"{declared_algorithm!r}.",
+            details={"field": "release_manifest_digest_algorithm"},
+        )
     components: dict[str, str] = {}
     required: list[str] = []
     extension_id = ""
@@ -345,6 +382,18 @@ def verify_release_manifest(path: str | Path, public_key_b64: str) -> TrustAncho
             raise ProvenanceRejected(
                 f"The signed manifest gave component {name!r} no SHA-256 digest.",
                 details={"field": "release_manifest_components", "component": name},
+            )
+        if name in components:
+            raise ProvenanceRejected(
+                f"The signed manifest declared component {name!r} more than once.",
+                details={"field": "release_manifest_components", "component": name},
+            )
+        entry_algorithm = str(entry.get("digest_algorithm") or "").strip()
+        if entry_algorithm and entry_algorithm != declared_algorithm:
+            raise ProvenanceRejected(
+                f"Component {name!r} declares digest algorithm {entry_algorithm!r}, which "
+                f"contradicts the release's {declared_algorithm!r}.",
+                details={"field": "release_manifest_digest_algorithm", "component": name},
             )
         components[name] = digest_value
         if bool(entry.get("required")):
@@ -387,6 +436,7 @@ def verify_release_manifest(path: str | Path, public_key_b64: str) -> TrustAncho
         released_at=str(release.get("released_at") or "").strip(),
         components=components,
         required_components=tuple(required),
+        digest_algorithm=declared_algorithm,
     )
 
 

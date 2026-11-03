@@ -162,10 +162,10 @@ class ReconciliationRejected(CoordinatorError):
     code = "flow_reconciliation_rejected"
 
 
-class UntrustedArtifact(proto.FlowProtocolError):
-    """The installed artifact is not independently verified."""
-
-    code = "flow_untrusted_artifact"
+#: Phase 3C.2.3: one class, not two. The coordinator used to define its own
+#: ``UntrustedArtifact``, so a caller that caught the trust module's class let the
+#: coordinator's copy escape — a refusal that looked handled and was not.
+from app.flow.trust import UntrustedArtifact  # noqa: E402  (after proto import)
 
 
 class CommandTransport(Protocol):
@@ -253,6 +253,7 @@ class GenerationCoordinator:
         *,
         live_generation_enabled: bool = False,
         trust_provider: Callable[[], Any] | None = None,
+        budget_ledger: Any = None,
         max_live_jobs: int = 1,
         command_timeout: float = 120.0,
         export_max_bytes: int = 25 * 1024 * 1024,
@@ -266,6 +267,8 @@ class GenerationCoordinator:
         #: provider reports a VERIFIED installed artifact. The bridge always supplies
         #: one; tests that exercise the lifecycle in isolation do not need to.
         self.trust_provider = trust_provider
+        #: Phase 3C.2.3 §9: a real reservation ledger, not a descriptive boolean.
+        self.budget_ledger = budget_ledger
         self.max_live_jobs = max_live_jobs
         self.command_timeout = command_timeout
         self.export_max_bytes = export_max_bytes
@@ -285,6 +288,15 @@ class GenerationCoordinator:
     @property
     def jobs(self) -> list[FlowJob]:
         return sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
+
+    @property
+    def idempotency_enforced(self) -> bool:
+        """Whether duplicate-paid-generation protection is actually active.
+
+        Derived from the mechanism the submit path uses (the key→request map and the
+        request-hash guard), not from a value a caller passes in.
+        """
+        return self._by_idempotency is not None and self._by_request is not None
 
     @property
     def live_jobs(self) -> list[FlowJob]:
@@ -330,9 +342,13 @@ class GenerationCoordinator:
             # Checked before anything touches a transport: no request is built,
             # no command is written, no socket is opened.
             raise LiveGenerationDisabled()
+        # Every refusal below happens *before* a reservation and before a request
+        # is built, so a blocked generation costs nothing and writes nothing.
         if self.trust_provider is not None:
             decision = self.trust_provider()
-            if not getattr(decision, "trusted", False):
+            if not getattr(decision, "trusted", False) or not getattr(
+                decision, "is_fresh", lambda: True
+            )():
                 state = getattr(decision, "state", "UNVERIFIED")
                 raise UntrustedArtifact(
                     "The installed extension is not verified, so no generation may be "
@@ -341,6 +357,10 @@ class GenerationCoordinator:
                 )
         if not approval_binding:
             raise ApprovalRequired()
+        # Phase 3C.2.3 §9: a real reservation against a real cap. With no ledger the
+        # caller holds no budget control, and the live guard refuses before we get
+        # here; a ledger that cannot cover the estimate raises rather than guessing.
+        estimate = self.budget_ledger.reserve(kind=kind) if self.budget_ledger is not None else 0.0
 
         key = (idempotency_key or request.idempotency_key or "").strip()
         request_hash = request.request_hash()

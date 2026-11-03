@@ -43,19 +43,39 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from app.flow.authorization import digest_excluded, tree_digest_from_pairs
+from app.flow.authorization import tree_digest_from_pairs
 
-DIGEST_ALGORITHM = "sha256-tree-v1"
+#: Source/licensing profile: VCS metadata and build caches are noise when the
+#: question is "what did the vendor ship".
+DIGEST_SOURCE = "sha256-tree-v1"
+#: Installed-runtime profile (Phase 3C.2.3). Everything the process can load is
+#: included — ``node_modules``, virtualenvs, ``site-packages``, ``__pycache__`` —
+#: because a runtime dependency is executable code. Only VCS metadata is skipped.
+DIGEST_RUNTIME = "sha256-tree-runtime-v1"
+DIGEST_ALGORITHM = DIGEST_RUNTIME
+SUPPORTED_DIGEST_ALGORITHMS = (DIGEST_RUNTIME, DIGEST_SOURCE)
 
 LAYOUT_VERSIONED = "versioned"
 LAYOUT_DIRECTORY = "directory"
-SUPPORTED_LAYOUTS = (LAYOUT_VERSIONED, LAYOUT_DIRECTORY)
+#: A plain directory with no Chrome manifest: an MCP server, the companion, a
+#: packaged runtime. Phase 3C.2.3 — without this, a signed manifest that requires
+#: the MCP server could never be satisfied, so "required" would have meant
+#: "required of the extension only".
+LAYOUT_TREE = "tree"
+SUPPORTED_LAYOUTS = (LAYOUT_VERSIONED, LAYOUT_DIRECTORY, LAYOUT_TREE)
 
 #: Chrome extension ids are 32 characters drawn from a-p.
 CHROME_ID = re.compile(r"^[a-p]{32}$")
 
-#: Directories never included in a measurement (identical to the gate's policy).
-EXCLUDED_DIRS = frozenset({".git", "__pycache__", "node_modules", ".venv", ".mypy_cache"})
+#: Per-algorithm directory policy. The runtime profile deliberately includes the
+#: dependency trees the source profile skips: a measurement that ignored
+#: ``node_modules`` would call two different MCP servers "the same build".
+_EXCLUSIONS = {
+    DIGEST_SOURCE: frozenset({".git", "__pycache__", "node_modules", ".venv", ".mypy_cache"}),
+    DIGEST_RUNTIME: frozenset({".git"}),
+}
+#: Nothing in this set is ever measured, under either profile.
+ALWAYS_EXCLUDED_FILES = frozenset({".DS_Store"})
 
 #: Files that must exist for an installation to be measurable at all.
 REQUIRED_FILES = ("manifest.json",)
@@ -101,6 +121,9 @@ def chrome_extension_id_from_key(key_b64: str) -> str:
 class MeasurementPolicy:
     """Bounds and inclusion rules for one measurement."""
 
+    #: Which digest profile to use. Declared in the signed release manifest too, so
+    #: a measurement and an anchor can never silently disagree about semantics.
+    digest_algorithm: str = DIGEST_RUNTIME
     max_files: int = 20_000
     max_file_bytes: int = 128 * 1024 * 1024
     max_total_bytes: int = 512 * 1024 * 1024
@@ -109,8 +132,17 @@ class MeasurementPolicy:
     allow_extra_files: bool = True
     require_service_worker: bool = True
 
+    def validate(self) -> "MeasurementPolicy":
+        if self.digest_algorithm not in SUPPORTED_DIGEST_ALGORITHMS:
+            raise MeasurementError(
+                "unsupported_digest_algorithm",
+                f"The digest algorithm {self.digest_algorithm!r} is not supported.",
+            )
+        return self
+
     def as_dict(self) -> dict[str, Any]:
         return {
+            "digest_algorithm": self.digest_algorithm,
             "max_files": self.max_files,
             "max_file_bytes": self.max_file_bytes,
             "max_total_bytes": self.max_total_bytes,
@@ -130,12 +162,13 @@ class InstallationSpec:
     policy: MeasurementPolicy = field(default_factory=MeasurementPolicy)
 
     def validate(self) -> "InstallationSpec":
+        self.policy.validate()
         if self.layout not in SUPPORTED_LAYOUTS:
             raise MeasurementError(
                 "unsupported_package_layout",
                 f"The installation layout {self.layout!r} is not supported.",
             )
-        if not self.expected_extension_id:
+        if self.layout != LAYOUT_TREE and not self.expected_extension_id:
             raise MeasurementError(
                 "extension_id_not_configured",
                 "No expected extension id is configured, so the directory cannot be "
@@ -326,10 +359,22 @@ def _safe_open_read(path: Path, root: Path, *, max_bytes: int) -> tuple[bytes, o
     return data, before
 
 
-def _walk_regular_files(root: Path, *, max_files: int) -> list[Path]:
-    """Every regular file under ``root``, refusing symlinks and special files."""
+def _walk_regular_files(
+    root: Path, *, max_files: int, exclusions: frozenset[str] = frozenset()
+) -> list[Path]:
+    """Every regular file under ``root``, refusing symlinks and special files.
+
+    Enumeration failures are fatal: an unreadable directory means the measurement
+    is incomplete, and an incomplete measurement must never be compared against a
+    digest as if it were whole.
+    """
     found: list[Path] = []
-    for current, dirnames, filenames in os.walk(root, followlinks=False):
+    errors: list[str] = []
+
+    def on_error(exc: OSError) -> None:
+        errors.append(f"{exc.filename}: {exc.strerror}")
+
+    for current, dirnames, filenames in os.walk(root, followlinks=False, onerror=on_error):
         here = Path(current)
         for name in sorted(dirnames):
             candidate = here / name
@@ -339,10 +384,10 @@ def _walk_regular_files(root: Path, *, max_files: int) -> list[Path]:
                     f"{candidate} is a symbolic link; a measurement never follows one.",
                     details={"path": str(candidate)},
                 )
-            if name in EXCLUDED_DIRS:
-                dirnames.remove(name)
-        dirnames.sort()
+        dirnames[:] = sorted(name for name in dirnames if name not in exclusions)
         for name in sorted(filenames):
+            if name in ALWAYS_EXCLUDED_FILES:
+                continue
             candidate = here / name
             mode = os.lstat(candidate).st_mode
             if stat.S_ISLNK(mode):
@@ -364,6 +409,13 @@ def _walk_regular_files(root: Path, *, max_files: int) -> list[Path]:
                     "The installation contains more files than the measurement limit allows.",
                     details={"limit": max_files},
                 )
+    if errors:
+        raise MeasurementError(
+            "enumeration_failed",
+            "Part of the installation could not be enumerated, so the measurement is "
+            "incomplete.",
+            details={"errors": errors[:8]},
+        )
     return found
 
 
@@ -457,6 +509,7 @@ def component_frame(report: MeasurementReport) -> dict[str, Any]:
         "measurement_id": report.measurement_id,
         "measured_at": report.finished_at,
         "file_count": report.file_count,
+        "digest_algorithm": report.digest_algorithm,
         "limitations": list(report.limitations),
         "checks": list(report.checks),
     }
@@ -486,6 +539,9 @@ class InstalledArtifactVerifier:
 
         extension_id, directory_version = self._identity_from_layout(root, spec)
         checks.append(f"layout_{spec.layout}")
+
+        if spec.layout == LAYOUT_TREE:
+            return self._measure_tree(root=root, spec=spec, started=started, checks=checks)
 
         manifest_path = root / "manifest.json"
         if not manifest_path.is_file():
@@ -541,18 +597,20 @@ class InstalledArtifactVerifier:
         if service_worker:
             checks.append("service_worker_resolved")
 
+        exclusions = _EXCLUSIONS[spec.policy.digest_algorithm]
         before_listing = sorted(
-            _relative_name(path, root) for path in _walk_regular_files(
-                root, max_files=spec.policy.max_files
+            _relative_name(path, root)
+            for path in _walk_regular_files(
+                root, max_files=spec.policy.max_files, exclusions=exclusions
             )
         )
         pairs: list[tuple[str, bytes]] = []
         files: list[MeasuredFile] = []
         total = 0
-        for path in _walk_regular_files(root, max_files=spec.policy.max_files):
+        for path in _walk_regular_files(
+            root, max_files=spec.policy.max_files, exclusions=exclusions
+        ):
             relative = _relative_name(path, root)
-            if digest_excluded(relative):
-                continue
             data, st = _safe_open_read(path, root, max_bytes=spec.policy.max_file_bytes)
             total += len(data)
             if total > spec.policy.max_total_bytes:
@@ -567,8 +625,9 @@ class InstalledArtifactVerifier:
             )
 
         after_listing = sorted(
-            _relative_name(path, root) for path in _walk_regular_files(
-                root, max_files=spec.policy.max_files
+            _relative_name(path, root)
+            for path in _walk_regular_files(
+                root, max_files=spec.policy.max_files, exclusions=exclusions
             )
         )
         if before_listing != after_listing:
@@ -590,6 +649,7 @@ class InstalledArtifactVerifier:
             manifest,
             files=files,
             service_worker=service_worker,
+            root=root,
             policy=spec.policy,
         )
         checks.append("file_policy_satisfied")
@@ -600,7 +660,7 @@ class InstalledArtifactVerifier:
             root=str(root),
             layout=spec.layout,
             digest=tree_digest_from_pairs(pairs),
-            digest_algorithm=DIGEST_ALGORITHM,
+            digest_algorithm=spec.policy.digest_algorithm,
             extension_id=extension_id,
             extension_version=version,
             manifest_version=int(manifest.get("manifest_version") or 0),
@@ -621,7 +681,106 @@ class InstalledArtifactVerifier:
             checks=tuple(checks),
         )
 
+    def _measure_tree(
+        self, *, root: Path, spec: InstallationSpec, started: float, checks: list[str]
+    ) -> MeasurementReport:
+        """Measure a directory that carries no Chrome manifest.
+
+        The rules that make a measurement worth having still apply: no symlinks, a
+        stable file listing, bounded size, every file hashed. What changes is that
+        there is no service worker to resolve and no manifest to police — the
+        authority for *what* this directory should contain is the signed release
+        manifest, so the digest of the whole tree is the entire comparison.
+        """
+        exclusions = _EXCLUSIONS[spec.policy.digest_algorithm]
+        before_listing = sorted(
+            _relative_name(path, root)
+            for path in _walk_regular_files(
+                root, max_files=spec.policy.max_files, exclusions=exclusions
+            )
+        )
+        pairs: list[tuple[str, bytes]] = []
+        files: list[MeasuredFile] = []
+        total = 0
+        for path in _walk_regular_files(
+            root, max_files=spec.policy.max_files, exclusions=exclusions
+        ):
+            relative = _relative_name(path, root)
+            data, _ = _safe_open_read(path, root, max_bytes=spec.policy.max_file_bytes)
+            total += len(data)
+            if total > spec.policy.max_total_bytes:
+                raise MeasurementError(
+                    "package_too_large",
+                    "The installation is larger than the measurement limit allows.",
+                    details={"limit": spec.policy.max_total_bytes},
+                )
+            pairs.append((relative, data))
+            files.append(
+                MeasuredFile(path=relative, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+            )
+        after_listing = sorted(
+            _relative_name(path, root)
+            for path in _walk_regular_files(
+                root, max_files=spec.policy.max_files, exclusions=exclusions
+            )
+        )
+        if before_listing != after_listing:
+            raise MeasurementError(
+                "file_added_during_measurement",
+                "The installation changed while it was being measured.",
+                details={
+                    "added": sorted(set(after_listing) - set(before_listing))[:16],
+                    "removed": sorted(set(before_listing) - set(after_listing))[:16],
+                },
+            )
+        checks.append("listing_stable")
+        checks.append("files_read_stable")
+        if not files:
+            raise MeasurementError(
+                "unsupported_package_layout", "The installation contains no files to measure."
+            )
+        return MeasurementReport(
+            measurement_id=uuid.uuid4().hex,
+            component=self.component,
+            root=str(root),
+            layout=spec.layout,
+            digest=tree_digest_from_pairs(pairs),
+            digest_algorithm=spec.policy.digest_algorithm,
+            extension_id=spec.expected_extension_id,
+            extension_version=spec.expected_version,
+            manifest_version=0,
+            service_worker="",
+            file_count=len(files),
+            total_bytes=total,
+            started_at=started,
+            finished_at=time.time(),
+            files=tuple(files),
+            limitations=(
+                "local_filesystem_only: this measures files on disk, not the code the "
+                "process has loaded into memory",
+                "no_process_correlation: the running component is not proven to be this "
+                "directory",
+                "host_trust_assumed: a compromised machine with write access to this "
+                "directory can present any bytes it likes",
+            ),
+            checks=tuple(checks) + ("tree_layout",),
+        )
+
     # ---------------------------------------------------------------- helpers
+    def _reject_symlinked_ancestors(self, root: Path) -> None:
+        """A root reached through a symlinked parent is not the directory it claims."""
+        current = root
+        while True:
+            if current.is_symlink():
+                raise MeasurementError(
+                    "symlink_in_package",
+                    f"{current} is a symbolic link; the installation path must be real.",
+                    details={"path": str(current)},
+                )
+            if current.parent == current:
+                return
+            current = current.parent
+
     def _validate_root(self, configured: Path) -> Path:
         root = Path(configured).expanduser()
         if not str(root):
@@ -641,6 +800,7 @@ class InstalledArtifactVerifier:
                 f"The configured installation {str(root)!r} does not exist.",
                 details={"root": str(root)},
             )
+        self._reject_symlinked_ancestors(root.absolute())
         resolved = root.resolve()
         if resolved != root.absolute():
             raise MeasurementError(
@@ -659,6 +819,11 @@ class InstalledArtifactVerifier:
         supply one; without it the installation cannot be identified and is
         rejected rather than guessed.
         """
+        if spec.layout == LAYOUT_TREE:
+            # Identity is supplied by the signed release manifest; there is nothing
+            # in the directory to derive it from, and the directory name is never
+            # trusted as an identity.
+            return spec.expected_extension_id, ""
         if spec.layout == LAYOUT_VERSIONED:
             version = root.name
             extension_id = root.parent.name
@@ -752,17 +917,22 @@ class InstalledArtifactVerifier:
         *,
         files: list[MeasuredFile],
         service_worker: Path | None,
+        root: Path,
         policy: MeasurementPolicy,
     ) -> None:
         names = {item.path for item in files}
         if "manifest.json" not in names:
             raise MeasurementError("missing_manifest", "manifest.json is missing from the package.")
         if service_worker is not None:
-            relative = service_worker.name
-            if not any(name == relative or name.endswith("/" + relative) for name in names):
+            # Exact normalized relative path: a different file with the same
+            # basename (`vendor/sw.js` vs `sw.js`) must not satisfy this check.
+            relative = service_worker.relative_to(root).as_posix()
+            if relative not in names:
                 raise MeasurementError(
                     "missing_service_worker",
-                    "The service worker was resolved but is absent from the measurement.",
+                    f"The declared service worker {relative!r} is absent from the "
+                    "measurement, so another file with that name cannot stand in for it.",
+                    details={"expected": relative},
                 )
         if policy.allow_extra_files:
             return

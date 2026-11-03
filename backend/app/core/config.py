@@ -228,7 +228,27 @@ class Settings(BaseSettings):
     #: Separately installed executables that must be measured too when required.
     flow_mcp_install_root: str = ""
     flow_companion_install_root: str = ""
-    flow_required_components: str = "chrome_extension"
+    #: Comma-separated *additional* required components. Empty means "the signed
+    #: release manifest decides"; the Chrome extension is always required. Naming a
+    #: narrower list than the manifest is refused, never silently honoured.
+    flow_required_components: str = ""
+    #: ---- Phase 3C.2.3 runtime measurement wiring ---------------------------
+    #: The local companion process measures these roots itself; the extension can
+    #: never submit a measurement. Layouts: ``versioned`` (Chrome) or ``directory``.
+    #: ``tree`` = a plain directory measured as a whole (no Chrome manifest). The
+    #: MCP server and the companion are not browser extensions, so they are installed
+    #: as trees; ``directory`` remains for an unpacked extension-style install.
+    #: (Layout settings live here rather than with the 3C.2.2 block above so that both
+    #: the root and its layout are read together.)
+    flow_mcp_install_layout: str = "tree"
+    flow_companion_install_layout: str = "tree"
+    #: Digest profile declared by the signed release and used by the measurement.
+    flow_artifact_digest_algorithm: str = "sha256-tree-runtime-v1"
+    #: ---- Phase 3C.2.3 spend controls --------------------------------------
+    #: A Flow budget exists only when both are set; the guard reports
+    #: ``budget_controls_missing`` otherwise. Zero is never "unlimited".
+    flow_generation_budget_usd: float = 0.0
+    flow_budget_enforcement: str = "none"  # none | flow_budget_ledger
     #: The companion reaches Crusor outbound; Crusor never dials the loopback port.
     flow_companion_id: str = ""
     flow_companion_secret: str = ""

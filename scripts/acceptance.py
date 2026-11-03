@@ -1784,7 +1784,7 @@ def main() -> int:
         _, status = http.call("GET", f"{flow}/status", expect=200)
         # The label follows the current hardening milestone; every boundary below
         # is still the Phase 3C.1 one and is asserted unchanged.
-        assert status["phase"] == "3C.2.2"
+        assert status["phase"] == "3C.2.3"
         assert status["live_generation_enabled"] is False
         assert status["available"] is False and status["enabled"] is False
         bridge = status["bridge"]
@@ -1809,7 +1809,7 @@ def main() -> int:
         _, system = http.call("GET", "/system/status", expect=200)
         assert system["flow"]["live_generation_enabled"] is False
         return (
-            f"phase 3C.2.2, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
+            f"phase 3C.2.3, bind_host=127.0.0.1, loopback_only=true, live_generation=false, "
             f"max_live_jobs=1, {len(blockers)} upstream blockers reported (generation off)"
         )
 
@@ -2082,6 +2082,8 @@ def main() -> int:
             "    good = await attempt(bridge, {**BASE, **auth})\n"
             "    out['ack'] = good.get('ack', {}).get('type')\n"
             "    out['trusted'] = good.get('ack', {}).get('provenance_trusted')\n"
+            "    out['claim_verified'] = good.get('ack', {}).get('hello_digest_claim_verified')\n"
+            "    out['trust_state'] = good.get('ack', {}).get('trust_state')\n"
             "    out['build_id'] = good.get('ack', {}).get('provenance', {}).get('build_id')\n"
             "    await bridge.stop()\n"
             "    bridge2 = FlowBridge(BridgeConfig(pairing_id=pid, pairing_secret=secret,\n"
@@ -2122,7 +2124,11 @@ def main() -> int:
         assert proc.returncode == 0, proc.stderr[-1200:]
         result = json.loads(proc.stdout.strip().splitlines()[-1])
         assert result["ack"] == "hello_ack", result
-        assert result["trusted"] is True, result
+        # Phase 3C.2.3: a HELLO digest is a claim. The ack must say so and must not
+        # report a session as trusted before anything has been measured.
+        assert result["trusted"] is False, result
+        assert result["claim_verified"] is True, result
+        assert result["trust_state"] == "UNVERIFIED", result
         assert result["build_id"] == "acceptance-build-1", result
         assert result["version_split"] == 4422, result
         assert result["old_protocol"] == 4426, result
@@ -2133,7 +2139,8 @@ def main() -> int:
         assert result["unanchored_state"] == "UNVERIFIED", result
         assert result["unanchored_trusted"] is False, result
         return (
-            "anchored build accepted (VERIFIED); 1.2.1/1.2.0/1.0.0 split, missing commit, "
+            "anchored build accepted with its digest claim verified but no session "
+            "trust before measurement (UNVERIFIED); 1.2.1/1.2.0/1.0.0 split, missing commit, "
             "wrong digest and missing digest all closed 4422; unsupported protocol 4426; "
             "without an anchor the same build is reported UNVERIFIED, never trusted"
         )
@@ -2631,8 +2638,8 @@ def main() -> int:
             "from app.flow import protocol as proto\n"
             "from app.flow.coordinator import GenerationCoordinator, UntrustedArtifact\n"
             "from app.flow.provenance import TrustAnchor\n"
-            "from app.flow.trust import (TrustDecision, TrustEvidence, VERIFIED, UNVERIFIED,\n"
-            "    evaluate_live_generation_guard)\n"
+            "from app.flow.trust import (TrustDecision, TrustEvidence, SpendingControls,\n"
+            "    VERIFIED, UNVERIFIED, MEASUREMENT_STALE, evaluate_live_generation_guard)\n"
             "class Transport:\n"
             "    def __init__(self): self.sent = []\n"
             "    async def send(self, envelope): self.sent.append(envelope)\n"
@@ -2640,10 +2647,13 @@ def main() -> int:
             "        raise AssertionError('no result')\n"
             "import asyncio\n"
             "async def main():\n"
+            "    CONTROL = SpendingControls(enforcement='flow_budget_ledger',\n"
+            "        cap_usd=5.0, ledger_wired=True)\n"
+            "    NO_BUDGET = SpendingControls()\n"
             "    out = {}\n"
             "    blocked = evaluate_live_generation_guard(live_generation_flag=False,\n"
             "        source_gate_status='SOURCE_ABSENT', decision=None, approval_binding='a'*64,\n"
-            "        budget_configured=True, idempotency_enforced=True)\n"
+            "        budget_controls=CONTROL, idempotency_enforced=True)\n"
             "    out['flag_off'] = blocked.allowed\n"
             "    out['blockers'] = list(blocked.blockers)\n"
             "    verified = TrustDecision(state=VERIFIED, evidence=TrustEvidence(\n"
@@ -2651,13 +2661,26 @@ def main() -> int:
             "        runtime_identity_correlated=True, measurement_fresh=True))\n"
             "    out['verified_but_flag_off'] = evaluate_live_generation_guard(\n"
             "        live_generation_flag=False, source_gate_status='AUTHORIZED', decision=verified,\n"
-            "        approval_binding='a'*64, budget_configured=True,\n"
+            "        approval_binding='a'*64, budget_controls=CONTROL,\n"
             "        idempotency_enforced=True).allowed\n"
             "    out['unverified_with_flag_on'] = evaluate_live_generation_guard(\n"
             "        live_generation_flag=True, source_gate_status='AUTHORIZED',\n"
             "        decision=TrustDecision(state=UNVERIFIED, evidence=TrustEvidence())\n"
-            "        , approval_binding='a'*64, budget_configured=True,\n"
+            "        , approval_binding='a'*64, budget_controls=CONTROL,\n"
             "        idempotency_enforced=True).allowed\n"
+            "    out['no_budget_control'] = evaluate_live_generation_guard(\n"
+            "        live_generation_flag=True, source_gate_status='AUTHORIZED',\n"
+            "        decision=verified, approval_binding='a'*64,\n"
+            "        budget_controls=NO_BUDGET, idempotency_enforced=True).allowed\n"
+            "    stale = TrustDecision(state=VERIFIED, evidence=TrustEvidence(\n"
+            "        installed_artifact_measured=True,\n"
+            "        installed_artifact_digest_matches_anchor=True,\n"
+            "        runtime_identity_correlated=True, measurement_fresh=True,\n"
+            "        measurement_expires_at=1.0))\n"
+            "    out['stale_decision'] = evaluate_live_generation_guard(\n"
+            "        live_generation_flag=True, source_gate_status='AUTHORIZED',\n"
+            "        decision=stale, approval_binding='a'*64,\n"
+            "        budget_controls=CONTROL, idempotency_enforced=True).allowed\n"
             "    transport = Transport()\n"
             "    coordinator = GenerationCoordinator(transport, live_generation_enabled=True,\n"
             "        trust_provider=lambda: TrustDecision(state=UNVERIFIED, evidence=TrustEvidence()))\n"
@@ -2685,15 +2708,150 @@ def main() -> int:
         assert "live_generation_disabled" in result["blockers"], result
         assert result["verified_but_flag_off"] is False, result
         assert result["unverified_with_flag_on"] is False, result
+        assert result["no_budget_control"] is False, result
+        assert result["stale_decision"] is False, result
         assert result["coordinator"] == "flow_untrusted_artifact", result
         assert result["sends"] == 0, result
         return (
             "flag off blocks regardless of trust; a VERIFIED fixture still cannot "
-            "generate while the flag is off; UNVERIFIED blocks with the flag on; the "
+            "generate while the flag is off; UNVERIFIED blocks with the flag on; a "
+            "missing spend control and an expired measurement both block; the "
             "coordinator refused flow_untrusted_artifact and dispatched nothing"
         )
 
     harness.check("63. Live generation requires verification, not a flag", c63)
+
+    def c64() -> str:
+        """The production companion path measures the roots; the peer cannot."""
+        code = (
+            "import asyncio, base64, json, tempfile, time\n"
+            "from pathlib import Path\n"
+            "from cryptography.hazmat.primitives import serialization\n"
+            "from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey\n"
+            "import websockets\n"
+            "from app.flow import protocol as proto\n"
+            "from app.flow.bridge import BridgeConfig, ComponentInstallSpec, FlowBridge\n"
+            "from app.flow.installed_artifact import (InstalledArtifactVerifier, InstallationSpec,\n"
+            "    LAYOUT_TREE)\n"
+            "from app.flow.provenance import COMPONENT_EXTENSION, COMPONENT_MCP\n"
+            "from app.flow.security import generate_pairing_id, generate_pairing_secret\n"
+            "EXT = 'abcdefghijklmnopabcdefghijklmnop'\n"
+            "VERSION = '1.3.0'\n"
+            "base = Path(tempfile.mkdtemp())\n"
+            "root = base / 'Extensions' / EXT / VERSION\n"
+            "root.mkdir(parents=True)\n"
+            "(root / 'manifest.json').write_text(json.dumps({'manifest_version': 3,\n"
+            "    'name': 'Synthetic', 'version': VERSION,\n"
+            "    'background': {'service_worker': 'sw.js'}}))\n"
+            "(root / 'sw.js').write_text('// synthetic sw\\n')\n"
+            "(root / 'content.js').write_text('// synthetic content\\n')\n"
+            "mcp = base / 'mcp-server'\n"
+            "(mcp / 'node_modules' / 'sdk').mkdir(parents=True)\n"
+            "(mcp / 'server.py').write_text('print(1)\\n')\n"
+            "(mcp / 'node_modules' / 'sdk' / 'index.js').write_text('module.exports = 1;\\n')\n"
+            "ext_report = InstalledArtifactVerifier(COMPONENT_EXTENSION).measure(\n"
+            "    InstallationSpec(root=root, expected_extension_id=EXT, expected_version=VERSION))\n"
+            "mcp_report = InstalledArtifactVerifier(COMPONENT_MCP).measure(\n"
+            "    InstallationSpec(root=mcp, layout=LAYOUT_TREE))\n"
+            "private = Ed25519PrivateKey.generate()\n"
+            "public = base64.b64encode(private.public_key().public_bytes(\n"
+            "    encoding=serialization.Encoding.Raw,\n"
+            "    format=serialization.PublicFormat.Raw)).decode()\n"
+            "document = {'schema': 'crusor.flow.release.v2', 'product': 'synthetic-fixture',\n"
+            "    'digest_algorithm': ext_report.digest_algorithm,\n"
+            "    'release': {'version': VERSION, 'commit': '0343884', 'build_id': 'build-acceptance-1'},\n"
+            "    'extension': {'id': EXT, 'version': VERSION, 'protocol': 'flow.bridge.v1',\n"
+            "                  'sha256': ext_report.digest},\n"
+            "    'components': [\n"
+            "        {'name': COMPONENT_EXTENSION, 'sha256': ext_report.digest,\n"
+            "         'extension_id': EXT, 'required': True},\n"
+            "        {'name': COMPONENT_MCP, 'version': VERSION, 'build_id': 'build-acceptance-1',\n"
+            "         'sha256': mcp_report.digest, 'required': True}]}\n"
+            "body = {k: v for k, v in document.items() if k != 'signature'}\n"
+            "canonical = json.dumps(body, sort_keys=True, separators=(',', ':')).encode()\n"
+            "manifest_path = base / 'release.json'\n"
+            "manifest_path.write_text(json.dumps({**body, 'signature':\n"
+            "    base64.b64encode(private.sign(canonical)).decode()}))\n"
+            "async def main():\n"
+            "    out = {}\n"
+            "    FlowBridge._source_gate_status = lambda self: 'AUTHORIZED'\n"
+            "    pairing_id = generate_pairing_id()\n"
+            "    secret = generate_pairing_secret()\n"
+            "    bridge = FlowBridge(BridgeConfig(pairing_id=pairing_id, pairing_secret=secret,\n"
+            "        http_port=0, ws_port=0, extension_ids=(EXT,), handshake_timeout=2.0,\n"
+            "        companion_id='acceptance-companion',\n"
+            "        release_manifest_path=str(manifest_path), release_manifest_public_key=public,\n"
+            "        require_installed_measurement=True,\n"
+            "        install_components=(\n"
+            "            ComponentInstallSpec(component=COMPONENT_EXTENSION, root=str(root)),\n"
+            "            ComponentInstallSpec(component=COMPONENT_MCP, root=str(mcp), layout=LAYOUT_TREE))))\n"
+            "    await bridge.start()\n"
+            "    hello = {'type': 'hello', 'protocol': proto.PROTOCOL_VERSION,\n"
+            "        'pairing_id': pairing_id, 'pairing_secret': secret, 'extension_id': EXT,\n"
+            "        'extension_version': VERSION, 'service_worker_version': VERSION,\n"
+            "        'mcp_version': VERSION, 'source_commit': '0343884', 'build_id': 'build-acceptance-1',\n"
+            "        'package_sha256': ext_report.digest, 'flow_tab_present': True}\n"
+            "    try:\n"
+            "        async with websockets.connect(f'ws://127.0.0.1:{bridge.ws_port}/ws') as ws:\n"
+            "            await ws.send(json.dumps(hello))\n"
+            "            ack = json.loads(await asyncio.wait_for(ws.recv(), 3))\n"
+            "            out['ack_trusted_before_measurement'] = ack.get('provenance_trusted')\n"
+            "            session = bridge.session\n"
+            "            if session is not None and session.measurement_task is not None:\n"
+            "                decision = await asyncio.wait_for(session.measurement_task, 30)\n"
+            "                out['state'] = decision.state\n"
+            "                out['reasons'] = list(decision.reasons)\n"
+            "            snapshot = bridge.snapshot()\n"
+            "            trust = snapshot['trust']\n"
+            "            out['measured_source'] = trust['measured'].get('source')\n"
+            "            out['component_states'] = {k: v['state'] for k, v in trust['components'].items()}\n"
+            "            await ws.send(json.dumps({'type': 'verification_report', 'challenge_id': 'a'*32,\n"
+            "                'nonce': 'b'*32, 'components': [{'name': COMPONENT_EXTENSION,\n"
+            "                'digest': 'c'*64, 'measurement_id': 'd'*32, 'file_count': 5,\n"
+            "                'measured_at': time.time()}]}))\n"
+            "            try:\n"
+            "                await asyncio.wait_for(ws.recv(), 3)\n"
+            "                out['peer_report'] = 'ACCEPTED'\n"
+            "            except websockets.ConnectionClosed as exc:\n"
+            "                out['peer_report'] = exc.rcvd.code if exc.rcvd else 0\n"
+            "    finally:\n"
+            "        await bridge.stop()\n"
+            "    (mcp / 'node_modules' / 'sdk' / 'index.js').write_text('module.exports = 2;\\n')\n"
+            "    patched = InstalledArtifactVerifier(COMPONENT_MCP).measure(\n"
+            "        InstallationSpec(root=mcp, layout=LAYOUT_TREE))\n"
+            "    out['dependency_in_digest'] = patched.digest != mcp_report.digest\n"
+            "    print(json.dumps(out))\n"
+            "asyncio.run(main())\n"
+        )
+        proc = subprocess.run(
+            [str(REPO_ROOT / ".venv" / "bin" / "python"), "-c", code],
+            cwd=BACKEND,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONPATH": "."},
+            timeout=240,
+        )
+        assert proc.returncode == 0, proc.stderr[-1500:]
+        result = json.loads(proc.stdout.strip().splitlines()[-1])
+        assert result["ack_trusted_before_measurement"] is False, result
+        assert result["state"] == "VERIFIED", result
+        assert result["measured_source"] == "local_companion", result
+        states = result["component_states"]
+        assert states["chrome_extension"] == "VERIFIED", result
+        assert states["mcp_server"] == "VERIFIED", result
+        # Not required by the signed release, so it is reported as unmeasured
+        # rather than quietly counted as verified.
+        assert states["local_companion"] == "NOT_MEASURED", result
+        assert result["peer_report"] == 4400, result
+        assert result["dependency_in_digest"] is True, result
+        return (
+            "the local companion measured both signed components itself and reached "
+            "VERIFIED only after the measurement; the ack reported no trust before it; "
+            "a peer-submitted verification_report was refused 4400; patching a "
+            "node_modules dependency changed the installed digest"
+        )
+
+    harness.check("64. The companion measures the roots itself; the peer cannot", c64)
 
 
     # ---- summary ---------------------------------------------------------

@@ -781,6 +781,20 @@ def flow_status_payload(
         except Exception as exc:  # noqa: BLE001 - an anchor that cannot verify proves nothing
             anchor_error = getattr(exc, "code", "release_anchor_invalid")
     registry = get_registry()
+    # Phase 3C.2.3: the signed manifest sets the floor; configuration may only add.
+    # The old default ("chrome_extension") reported a requirement set that had
+    # nothing to do with what the release actually declares.
+    required: list[str] = [COMPONENT_EXTENSION]
+    for name in (
+        *anchor.required_components,
+        *(
+            item.strip()
+            for item in str(getattr(settings, "flow_required_components", "")).split(",")
+            if item.strip()
+        ),
+    ):
+        if name not in required:
+            required.append(name)
     trust_block = trust_status_payload(
         policy_anchor=anchor,
         decision=registry.latest(),
@@ -789,17 +803,13 @@ def flow_status_payload(
             getattr(settings, "flow_source_package_path", ""),
             attestation_path=getattr(settings, "flow_authorization_attestation_path", ""),
         )["status"],
-        required_components=tuple(
-            item.strip()
-            for item in str(getattr(settings, "flow_required_components", "chrome_extension")).split(",")
-            if item.strip()
-        ) or (COMPONENT_EXTENSION,),
+        required_components=tuple(required),
     )
     if anchor_error:
         trust_block["anchor"]["error"] = anchor_error
     return {
         "integration": "google_flow_connector",
-        "phase": "3C.2.2",
+        "phase": "3C.2.3",
         "available": False,
         "enabled": False,
         "live_generation_enabled": bool(settings.flow_live_generation_enabled),
@@ -848,14 +858,51 @@ def flow_status_payload(
             attestation_path=getattr(settings, "flow_authorization_attestation_path", ""),
         ),
         "trust": trust_block,
+        # Phase 3C.2.3: what the local process would measure, and what it would
+        # measure it with. Reported so an operator can see that a required component
+        # has no configured root *before* a session is refused.
+        "measurement": {
+            "performed_by": "local_companion_process",
+            "extension_root_configured": bool(
+                str(getattr(settings, "flow_extension_install_root", "")).strip()
+            ),
+            "extension_layout": str(
+                getattr(settings, "flow_extension_install_layout", "versioned")
+            ),
+            "mcp_root_configured": bool(
+                str(getattr(settings, "flow_mcp_install_root", "")).strip()
+            ),
+            "mcp_layout": str(getattr(settings, "flow_mcp_install_layout", "tree")),
+            "companion_root_configured": bool(
+                str(getattr(settings, "flow_companion_install_root", "")).strip()
+            ),
+            "companion_layout": str(
+                getattr(settings, "flow_companion_install_layout", "tree")
+            ),
+            "digest_algorithm": str(
+                getattr(settings, "flow_artifact_digest_algorithm", "sha256-tree-runtime-v1")
+            ),
+            "freshness_seconds": float(
+                getattr(settings, "flow_measurement_freshness_seconds", 300.0)
+            ),
+            "required": list(required),
+            "peer_reported_measurement_accepted": False,
+            "budget_enforcement": str(getattr(settings, "flow_budget_enforcement", "none")),
+            "budget_cap_usd": float(
+                getattr(settings, "flow_generation_budget_usd", 0.0) or 0.0
+            ),
+        },
         "protocol": {
             "supported": list(proto.SUPPORTED_PROTOCOLS),
             "trust_semantics": {
                 "claims_well_formed": "syntax only",
                 "components_consistent": "package agrees with itself",
-                "artifact_integrity_verified": "installed bytes match a pinned digest "
-                "or an Ed25519-signed release manifest",
-                "provenance_trusted": "all three, never fewer",
+                "artifact_integrity_verified": "the HELLO's digest claim matches the "
+                "release; a claim, never evidence about the installed files",
+                "installed_artifact_measured": "read from disk by the local companion "
+                "process, never submitted by the extension",
+                "provenance_trusted": "session trust: measured locally, matched to a "
+                "signed release, still inside its validity window",
                 "unverified_state": "UNVERIFIED",
             },
             "current": proto.PROTOCOL_VERSION,

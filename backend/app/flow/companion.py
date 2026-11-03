@@ -106,6 +106,7 @@ class LocalFlowCompanion:
     config: CompanionConfig
     bridge_config: BridgeConfig
     bridge: FlowBridge | None = None
+    settings: Any = None
     client: httpx.AsyncClient | None = None
     status: CompanionStatus = field(default_factory=CompanionStatus)
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
@@ -120,7 +121,7 @@ class LocalFlowCompanion:
     async def start(self) -> None:
         self.status.state = CompanionState.STARTING
         if self.bridge is None:
-            self.bridge = FlowBridge(self.bridge_config)
+            self.bridge = FlowBridge(self.bridge_config, settings=self.settings)
             self._owns_bridge = True
         await self.bridge.start()
         self.status.paired = self.bridge.paired
@@ -196,6 +197,10 @@ class LocalFlowCompanion:
             "allowed_commands": list(proto.ALLOWED_COMMANDS),
             "live_generation": False,
             "generation_commands_executable": bool(self.config.allow_generation_commands),
+            "measures_installed_artifacts": bool(
+                self.bridge_config.require_installed_measurement
+            ),
+            "measurement_components": [spec.component for spec in self.bridge_config.install_components],
             "loopback_only": True,
             "limits": snapshot.get("limits", {}),
         }
@@ -388,7 +393,11 @@ def companion_from_settings() -> "LocalFlowCompanion":
         poll_wait_seconds=int(settings.flow_request_timeout_seconds or 20),
         heartbeat_seconds=float(settings.flow_handshake_timeout_seconds or 20) * 4,
     )
-    return LocalFlowCompanion(config=config, bridge_config=bridge_config_from_settings(settings))
+    return LocalFlowCompanion(
+        config=config,
+        bridge_config=bridge_config_from_settings(settings),
+        settings=settings,
+    )
 
 
 def main() -> int:

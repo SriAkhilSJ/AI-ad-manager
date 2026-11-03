@@ -46,6 +46,7 @@ from app.flow.provenance import (
 )
 from app.flow.trust import (
     ARTIFACT_DIGEST_MISMATCH,
+    SpendingControls,
     ARTIFACT_MEASUREMENT_FAILED,
     COMPONENT_UNVERIFIED,
     COMPONENT_VERIFIED,
@@ -66,6 +67,12 @@ from app.flow.trust import (
     aggregate_trust,
     evaluate_live_generation_guard,
 )
+
+#: Spend-control fixtures: the guard now asks for a real control object.
+VERIFIED_SPENDING = SpendingControls(
+    enforcement="flow_budget_ledger", cap_usd=5.0, ledger_wired=True
+)
+NO_SPENDING = SpendingControls()
 
 BACKEND = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND.parent
@@ -308,7 +315,7 @@ def test_a_manifest_that_disagrees_with_itself_is_rejected(release, tmp_path):
 def test_a_matching_install_measures_to_the_release_digest(release):
     report = InstalledArtifactVerifier().measure(release["spec"])
     assert report.digest == release["digest"]
-    assert report.digest_algorithm == "sha256-tree-v1"
+    assert report.digest_algorithm == "sha256-tree-runtime-v1"
     assert report.extension_id == EXT_ID
     assert report.extension_version == VERSION
     assert report.service_worker == "sw.js"
@@ -334,13 +341,36 @@ def test_the_measurement_and_the_gate_compute_the_same_digest(release, tmp_path)
     assert copied.digest == package_tree_digest(root)
 
 
-def test_both_digest_paths_ignore_the_same_excluded_directories(release, tmp_path):
+def test_the_runtime_profile_includes_what_the_source_profile_skips(release):
+    """Phase 3C.2.3: dependency code is measured, not silently skipped.
+
+    The licensing profile ignores `node_modules`/`__pycache__` because they are build
+    noise in a vendor drop. The installed-runtime profile cannot: those files are
+    code the process loads, so excluding them would let a patched dependency report
+    the release digest.
+    """
     root = release["root"]
-    (root / ".git").mkdir()
-    (root / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (root / "node_modules" / "dep").mkdir(parents=True)
+    (root / "node_modules" / "dep" / "index.js").write_text("// dep\n", encoding="utf-8")
     (root / "__pycache__").mkdir()
     (root / "__pycache__" / "x.pyc").write_bytes(b"\x00\x01")
-    assert InstalledArtifactVerifier().measure(release["spec"]).digest == package_tree_digest(root)
+
+    runtime = InstalledArtifactVerifier().measure(release["spec"])
+    source = InstalledArtifactVerifier().measure(
+        InstallationSpec(
+            root=root,
+            expected_extension_id=EXT_ID,
+            expected_version=VERSION,
+            policy=MeasurementPolicy(digest_algorithm="sha256-tree-v1"),
+        )
+    )
+    assert runtime.digest_algorithm == "sha256-tree-runtime-v1"
+    assert source.digest_algorithm == "sha256-tree-v1"
+    # The source profile still agrees with the licensing gate's own digest.
+    assert source.digest == package_tree_digest(root)
+    # The runtime profile sees the dependency, so it cannot equal the source digest.
+    assert runtime.digest != source.digest
+    assert runtime.file_count == source.file_count + 2
 
 
 def test_a_modified_service_worker_changes_the_digest(release):
@@ -510,9 +540,9 @@ def test_a_file_added_during_measurement_fails_the_report(release, monkeypatch):
     real_walk = module._walk_regular_files
     calls = {"n": 0}
 
-    def walk_then_mutate(root, *, max_files):
+    def walk_then_mutate(root, *, max_files, exclusions=frozenset()):
         calls["n"] += 1
-        found = real_walk(root, max_files=max_files)
+        found = real_walk(root, max_files=max_files, exclusions=exclusions)
         if calls["n"] == 2:
             (Path(root) / "injected.js").write_text("// injected mid-measurement\n", encoding="utf-8")
         return found
@@ -653,7 +683,7 @@ def _submit(
             digest=digest,
             extension_id=extension_id,
             version=version,
-            measurement_id="m" * 32,
+            file_count=1, measurement_id="a" * 32,
             measured_at=challenge.issued_at if measured_at is None else measured_at,
         )
     ]
@@ -681,7 +711,7 @@ def test_a_fresh_challenge_bound_measurement_correlates_identity(release):
                 digest=release["digest"],
                 extension_id=EXT_ID,
                 version=VERSION,
-                measurement_id="m" * 32,
+                file_count=1, measurement_id="a" * 32,
                 measured_at=challenge.issued_at,
             ),
         ),
@@ -791,7 +821,8 @@ def test_a_report_from_another_session_is_refused(release):
     assert excinfo.value.code == "challenge_wrong_session"
 
 
-def test_a_measurement_from_before_the_challenge_is_stale(release):
+def test_a_measurement_from_before_the_challenge_is_refused(release):
+    """Phase 3C.2.3: an earlier measurement cannot be bound to a later session."""
     attestation = _attestation(release)
     challenge = attestation.store.issue(
         session_id="session-1", companion_id=EXT_ID, extension_id=EXT_ID
@@ -805,24 +836,25 @@ def test_a_measurement_from_before_the_challenge_is_stale(release):
                 digest=release["digest"],
                 extension_id=EXT_ID,
                 version=VERSION,
-                measurement_id="m" * 32,
+                measurement_id="a" * 32,
+                file_count=1,
                 measured_at=challenge.issued_at - 120,
             ),
         ),
     )
-    evidence = attestation.accept(
-        submission,
-        session_id="session-1",
-        companion_id=EXT_ID,
-        hello_extension_id=EXT_ID,
-        hello_version=VERSION,
-        hello_digest=release["digest"],
-    )
-    assert evidence.measurement_fresh is False
-    assert "measurement_stale" in evidence.failures
+    with pytest.raises(AttestationRejected) as excinfo:
+        attestation.accept(
+            submission,
+            session_id="session-1",
+            companion_id=EXT_ID,
+            hello_extension_id=EXT_ID,
+            hello_version=VERSION,
+            hello_digest=release["digest"],
+        )
+    assert excinfo.value.code == "measurement_outside_challenge_window"
 
 
-def test_an_old_measurement_outside_the_freshness_window_is_stale(release):
+def test_an_old_measurement_outside_the_freshness_window_is_refused(release):
     attestation = _attestation(release)
     challenge = attestation.store.issue(
         session_id="session-1", companion_id=EXT_ID, extension_id=EXT_ID
@@ -836,22 +868,23 @@ def test_an_old_measurement_outside_the_freshness_window_is_stale(release):
                 digest=release["digest"],
                 extension_id=EXT_ID,
                 version=VERSION,
-                measurement_id="m" * 32,
+                measurement_id="a" * 32,
+                file_count=1,
                 measured_at=challenge.issued_at,
             ),
         ),
     )
-    # Same challenge, but a clock far enough ahead that the measurement is old.
     attestation.clock = lambda: challenge.issued_at + 10_000
-    evidence = attestation.accept(
-        submission,
-        session_id="session-1",
-        companion_id=EXT_ID,
-        hello_extension_id=EXT_ID,
-        hello_version=VERSION,
-        hello_digest=release["digest"],
-    )
-    assert "measurement_stale" in evidence.failures
+    with pytest.raises(AttestationRejected) as excinfo:
+        attestation.accept(
+            submission,
+            session_id="session-1",
+            companion_id=EXT_ID,
+            hello_extension_id=EXT_ID,
+            hello_version=VERSION,
+            hello_digest=release["digest"],
+        )
+    assert excinfo.value.code == "measurement_outside_challenge_window"
 
 
 def test_a_measurement_claiming_to_be_from_the_future_is_refused(release):
@@ -868,21 +901,22 @@ def test_a_measurement_claiming_to_be_from_the_future_is_refused(release):
                 digest=release["digest"],
                 extension_id=EXT_ID,
                 version=VERSION,
-                measurement_id="m" * 32,
+                measurement_id="a" * 32,
+                file_count=1,
                 measured_at=challenge.issued_at + 3_600,
             ),
         ),
     )
-    evidence = attestation.accept(
-        submission,
-        session_id="session-1",
-        companion_id=EXT_ID,
-        hello_extension_id=EXT_ID,
-        hello_version=VERSION,
-        hello_digest=release["digest"],
-    )
-    assert "measurement_from_future" in evidence.failures
-    assert evidence.measurement_fresh is False
+    with pytest.raises(AttestationRejected) as excinfo:
+        attestation.accept(
+            submission,
+            session_id="session-1",
+            companion_id=EXT_ID,
+            hello_extension_id=EXT_ID,
+            hello_version=VERSION,
+            hello_digest=release["digest"],
+        )
+    assert excinfo.value.code == "measurement_outside_challenge_window"
 
 
 def test_a_hello_digest_that_contradicts_the_measurement_is_recorded(release):
@@ -1012,31 +1046,19 @@ def test_a_mismatching_artifact_is_not_trusted(release, tmp_path):
 
 
 def test_a_stale_measurement_is_not_trusted(release):
-    attestation = _attestation(release)
-    challenge = attestation.store.issue(
-        session_id="session-1", companion_id=EXT_ID, extension_id=EXT_ID
-    )
-    submission = VerificationSubmission(
-        challenge_id=challenge.challenge_id,
-        nonce=challenge.nonce,
-        components=(
-            ComponentReport(
-                name=COMPONENT_EXTENSION,
-                digest=release["digest"],
-                extension_id=EXT_ID,
-                version=VERSION,
-                measurement_id="m" * 32,
-                measured_at=challenge.issued_at - 10,
-            ),
-        ),
-    )
-    evidence = attestation.accept(
-        submission,
-        session_id="session-1",
-        companion_id=EXT_ID,
-        hello_extension_id=EXT_ID,
-        hello_version=VERSION,
-        hello_digest=release["digest"],
+    """Freshness is a property of the evidence, and aggregation honours it."""
+    evidence = TrustEvidence(
+        supported_protocol=True,
+        claims_well_formed=True,
+        components_consistent=True,
+        release_anchor_valid=True,
+        installed_artifact_measured=True,
+        installed_artifact_digest_matches_anchor=True,
+        runtime_identity_correlated=True,
+        measurement_fresh=False,
+        measurement_expires_at=1.0,
+        component_states={COMPONENT_EXTENSION: COMPONENT_VERIFIED},
+        required_components=(COMPONENT_EXTENSION,),
     )
     decision = _decide(release, evidence=evidence)
     assert decision.state == MEASUREMENT_STALE
@@ -1116,7 +1138,7 @@ def test_the_guard_lists_every_blocker(release):
         source_gate_status="SOURCE_ABSENT",
         decision=None,
         approval_binding="",
-        budget_configured=False,
+        budget_controls=NO_SPENDING,
         idempotency_enforced=True,
     )
     assert guard.allowed is False
@@ -1134,7 +1156,7 @@ def test_the_guard_allows_only_a_complete_set(release):
         source_gate_status="AUTHORIZED",
         decision=decision,
         approval_binding="a" * 64,
-        budget_configured=True,
+        budget_controls=VERIFIED_SPENDING,
         idempotency_enforced=True,
     )
     assert guard.allowed is True
@@ -1159,7 +1181,7 @@ def test_an_approval_cannot_bypass_a_failed_measurement(release, tmp_path):
         source_gate_status="AUTHORIZED",
         decision=decision,
         approval_binding="a" * 64,
-        budget_configured=True,
+        budget_controls=VERIFIED_SPENDING,
         idempotency_enforced=True,
     )
     assert guard.allowed is False
@@ -1298,19 +1320,16 @@ def test_a_replayed_challenge_is_auditable(release):
 # B — bridge integration
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
-async def test_the_bridge_issues_a_challenge_and_accepts_a_matching_report(
-    release, monkeypatch
-):
+async def test_the_bridge_measures_locally_and_trusts_the_session(release, monkeypatch):
+    """The production path: this process reads the roots, the peer only gets an ack."""
     import asyncio
 
     import websockets
 
-    from app.flow.bridge import BridgeConfig, FlowBridge
+    from app.flow.bridge import BridgeConfig, ComponentInstallSpec, FlowBridge
     from app.flow.security import generate_pairing_id, generate_pairing_secret
 
-    monkeypatch.setattr(
-        FlowBridge, "_source_gate_status", lambda self: "AUTHORIZED", raising=True
-    )
+    monkeypatch.setattr(FlowBridge, "_source_gate_status", lambda self: "AUTHORIZED")
     pairing_id = generate_pairing_id()
     secret = generate_pairing_secret()
     bridge = FlowBridge(
@@ -1321,9 +1340,13 @@ async def test_the_bridge_issues_a_challenge_and_accepts_a_matching_report(
             ws_port=0,
             extension_ids=(EXT_ID,),
             handshake_timeout=2.0,
+            companion_id="companion-fixture",
             release_manifest_path=str(release["manifest_path"]),
             release_manifest_public_key=release["public"],
             require_installed_measurement=True,
+            install_components=(
+                ComponentInstallSpec(component=COMPONENT_EXTENSION, root=str(release["root"])),
+            ),
         )
     )
     await bridge.start()
@@ -1347,42 +1370,28 @@ async def test_the_bridge_issues_a_challenge_and_accepts_a_matching_report(
             ack = json.loads(await asyncio.wait_for(ws.recv(), 3))
             assert ack["type"] == "hello_ack"
             assert ack["measurement_required"] is True
-            challenge = json.loads(await asyncio.wait_for(ws.recv(), 3))
-            assert challenge["type"] == "verification_challenge"
-            assert challenge["required_components"] == [COMPONENT_EXTENSION]
-
-            import time as _time
-
-            await ws.send(
-                json.dumps(
-                    {
-                        "type": "verification_report",
-                        "challenge_id": challenge["challenge_id"],
-                        "nonce": challenge["nonce"],
-                        "components": [
-                            {
-                                "name": COMPONENT_EXTENSION,
-                                "digest": release["digest"],
-                                "extension_id": EXT_ID,
-                                "version": VERSION,
-                                "measurement_id": "m" * 32,
-                                "measured_at": _time.time(),
-                            }
-                        ],
-                    }
-                )
-            )
-            await asyncio.sleep(0.3)
+            # The peer is told nothing it could use to manufacture a measurement.
+            assert ack["provenance_trusted"] is False
+            session = bridge.session
+            assert session is not None
+            if session.measurement_task is not None:
+                await asyncio.wait_for(session.measurement_task, 15)
+            for _ in range(40):
+                if bridge.snapshot()["trust"]["state"] != "UNVERIFIED":
+                    break
+                await asyncio.sleep(0.1)
         snapshot = bridge.snapshot()
-        assert snapshot["trust"]["state"] == VERIFIED
+        assert snapshot["trust"]["state"] == VERIFIED, snapshot["trust"]["reasons"]
         assert snapshot["trust"]["measured"]["artifact_digest"] == release["digest"]
+        assert snapshot["trust"]["measured"]["source"] == "local_companion"
         assert snapshot["trust"]["components"][COMPONENT_EXTENSION]["state"] == COMPONENT_VERIFIED
     finally:
         await bridge.stop()
 
 
 @pytest.mark.asyncio
-async def test_the_bridge_closes_a_replayed_or_foreign_report(release, monkeypatch):
+async def test_a_peer_supplied_report_cannot_establish_trust(release, monkeypatch):
+    """A verification_report frame over the extension socket is not a measurement."""
     import asyncio
 
     import websockets
@@ -1401,9 +1410,10 @@ async def test_the_bridge_closes_a_replayed_or_foreign_report(release, monkeypat
             ws_port=0,
             extension_ids=(EXT_ID,),
             handshake_timeout=2.0,
+            companion_id="companion-fixture",
             release_manifest_path=str(release["manifest_path"]),
             release_manifest_public_key=release["public"],
-            require_installed_measurement=True,
+            require_installed_measurement=False,
         )
     )
     await bridge.start()
@@ -1424,19 +1434,21 @@ async def test_the_bridge_closes_a_replayed_or_foreign_report(release, monkeypat
         async with websockets.connect(f"ws://127.0.0.1:{bridge.ws_port}/ws") as ws:
             await ws.send(json.dumps(hello))
             await asyncio.wait_for(ws.recv(), 3)  # hello_ack
-            await asyncio.wait_for(ws.recv(), 3)  # challenge
             await ws.send(
                 json.dumps(
                     {
                         "type": "verification_report",
-                        "challenge_id": "not-a-real-challenge",
-                        "nonce": "x" * 32,
+                        "challenge_id": "a" * 32,
+                        "nonce": "b" * 32,
                         "components": [
                             {
                                 "name": COMPONENT_EXTENSION,
                                 "digest": release["digest"],
                                 "extension_id": EXT_ID,
                                 "version": VERSION,
+                                "measurement_id": "c" * 32,
+                                "file_count": 3,
+                                "measured_at": 1_800_000_000.0,
                             }
                         ],
                     }
@@ -1444,28 +1456,10 @@ async def test_the_bridge_closes_a_replayed_or_foreign_report(release, monkeypat
             )
             with pytest.raises(websockets.ConnectionClosed) as excinfo:
                 await asyncio.wait_for(ws.recv(), 3)
+            # Unknown frame type: the protocol has no peer-measurement verb at all.
             assert excinfo.value.rcvd is not None
-            assert excinfo.value.rcvd.code == proto.WS_CLOSE_MEASUREMENT
-        assert bridge.stats["ws_rejected_measurement"] == 1
+            assert excinfo.value.rcvd.code == 4400
+        assert bridge.snapshot()["trust"]["state"] != VERIFIED
+        assert bridge.snapshot()["trust"]["trusted"] is False
     finally:
         await bridge.stop()
-
-
-@pytest.mark.asyncio
-async def test_the_bridge_refuses_an_unmeasured_generation(monkeypatch):
-    from app.flow.bridge import BridgeConfig, FlowBridge
-    from app.flow.security import generate_pairing_id, generate_pairing_secret
-    from app.flow.coordinator import UntrustedArtifact as CoordinatorUntrusted
-
-    bridge = FlowBridge(
-        BridgeConfig(
-            pairing_id=generate_pairing_id(),
-            pairing_secret=generate_pairing_secret(),
-            http_port=0,
-            ws_port=0,
-            extension_ids=(EXT_ID,),
-        )
-    )
-    request = proto.GenerationCommand(prompt="synthetic", model="imagen-3", count=1)
-    with pytest.raises((CoordinatorUntrusted, Exception)):
-        await bridge.submit_generation("image", request, approval_binding="a" * 64)

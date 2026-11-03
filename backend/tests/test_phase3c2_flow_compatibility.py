@@ -268,7 +268,13 @@ async def test_a_proven_handshake_is_accepted_and_reported(bridge: FlowBridge, p
         await ws.send(_pairing_hello(pairing))
         ack = json.loads(await asyncio.wait_for(ws.recv(), 3))
         assert ack["type"] == "hello_ack"
-        assert ack["provenance_trusted"] is True
+        # Phase 3C.2.3: a HELLO digest is a claim, so the ack reports the claim and
+        # never a session-level "trusted". Session trust needs a local measurement.
+        assert ack["provenance_trusted"] is False
+        assert ack["trust_state"] == "UNVERIFIED"
+        assert ack["hello_digest_claim_verified"] is True
+        # This fixture configures no install roots, so no measurement is attempted.
+        assert ack["measurement_required"] is False
         assert ack["provenance_state"] == "VERIFIED"
         assert ack["trust_anchor"] == "pinned_digest"
         # Three independent facts, each reported as itself: the ack must not imply
@@ -281,7 +287,8 @@ async def test_a_proven_handshake_is_accepted_and_reported(bridge: FlowBridge, p
         assert ack["provenance"]["source_commit"] == "0343884"
         snapshot = bridge.snapshot()
         assert snapshot["provenance"]["build_id"] == "build-2026-11-03"
-        assert snapshot["provenance_trusted"] is True
+        assert snapshot["hello_digest_claim_verified"] is True
+        assert snapshot["provenance_trusted"] is False
         assert snapshot["supported_protocols"] == list(proto.SUPPORTED_PROTOCOLS)
     finally:
         await ws.close()

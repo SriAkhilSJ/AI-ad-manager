@@ -29,6 +29,8 @@ Everything else — ``eval_script``, ``native_click``, ``native_key``,
 
 from __future__ import annotations
 
+from app.flow.delivery import DeliveryOutcome
+
 import hashlib
 import re
 import uuid
@@ -321,6 +323,9 @@ class CommandDenied(FlowProtocolError):
     """The command is real but not on Crusor's allowlist."""
 
     code = "command_not_allowed"
+    #: Phase 3C.2.3.2 — the allowlist is checked before any socket operation, so this
+    #: refusal is provable non-delivery and never carries a billing consequence.
+    delivery = DeliveryOutcome.DEFINITELY_NOT_SENT
 
 
 class UnsafeBinding(FlowProtocolError):

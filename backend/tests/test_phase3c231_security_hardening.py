@@ -405,17 +405,33 @@ async def test_an_existing_live_job_reserves_nothing():
         await first
 
 
-async def test_a_transport_failure_before_dispatch_releases_the_reservation():
+async def test_a_proven_pre_dispatch_failure_releases_the_reservation():
+    """Phase 3C.2.3.2: only *proven* non-delivery refunds.
+
+    This test used to raise a bare ``ConnectionError`` from ``send()`` and expect a
+    refund. That was the defect: once a socket send is entered, an exception does not
+    prove the frame stayed home. A transport now has to say so explicitly, with
+    :class:`~app.flow.delivery.DefiniteNonDelivery`.
+    """
+    from app.flow.delivery import DefiniteNonDelivery
+
+    class NotDelivered(_PendingTransport):
+        async def send(self, envelope):
+            raise DefiniteNonDelivery("the session was never paired")
+
     ledger = FlowBudgetLedger(cap_usd=5.0)
-    transport = _PendingTransport(fail_send=True)
+    transport = NotDelivered()
     coordinator = _coordinator(transport, ledger)
     job = await coordinator.submit("image", _request("x"), approval_binding="a" * 64)
     assert job.state.value == "failed"
     assert job.dispatched is False
+    assert job.delivery.value == "definitely_not_sent"
     assert transport.sent == []
     assert ledger.spent_usd == 0.0
     assert ledger.reservations == 0
     assert coordinator._reservations == {}
+    # Proven non-delivery is retryable.
+    assert job.error is not None and job.error.retryable is True
 
 
 async def test_an_ambiguous_result_keeps_the_reservation():
@@ -572,9 +588,11 @@ def test_a_directory_replaced_during_traversal_fails_closed(tmp_path, monkeypatc
     real_open_child = artifact_module._open_child_dir
     swapped = {"done": False}
 
-    def open_then_swap(parent_fd: int, name: str, relative: str) -> int:
-        child = real_open_child(parent_fd, name, relative)
-        if not swapped["done"]:
+    def open_then_swap(parent_fd: int, name: str, relative: str, **kwargs: Any) -> int:
+        child = real_open_child(parent_fd, name, relative, **kwargs)
+        # Only the measured tree's own directory is swapped; the root acquisition walk
+        # below "/" must be left alone (it now goes through this same helper).
+        if not swapped["done"] and name == "node_modules":
             swapped["done"] = True
             # The descriptor keeps measuring the directory that was opened, while the
             # name now points somewhere else. The parent's re-listing refuses it.

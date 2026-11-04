@@ -37,7 +37,7 @@ passing these tests is evidence about the machinery, never about DeepX.
 | `FlowBudgetLedger.reserve()` mutated `spent_usd`/`reservations` without a lock and `release()` did not exist | concurrent submissions could overspend the cap; a dispatch that failed left a permanent charge |
 | `FlowBudgetLedger(cap_usd=0.0)` and `cap_usd=float("inf")` were accepted | `SpendingControls.active` reported an active control that could never refuse anything, and "0" read as "unlimited" |
 | the coordinator reserved *before* the replay/idempotency/existing-job checks | a replay, a rejected duplicate or a rejected second job each consumed budget without an attempt |
-| nothing refunded a send failure | a socket that closed before the frame left was billed |
+| nothing refunded a send failure | a socket that closed before the frame left was billed (the 3C.2.3.1 fix over-corrected; 3C.2.3.2 classifies delivery instead) |
 
 ### What it does now
 
@@ -63,11 +63,18 @@ passing these tests is evidence about the machinery, never about DeepX.
 * `_release_reservation(job_id)` refunds exactly once (the map entry is popped first, so a
   double release cannot double-refund) and `_settle_reservation(job_id)` drops the tracking and
   *keeps* the spend.
-* Refund happens only when dispatch is **provably not delivered**: `transport.send()` raised
-  before the frame left (`dispatched is False`), or the provider returned a result carrying
-  `error.dispatched is False`. After a confirmed submit, after an ambiguous result
+* Refund happens only when dispatch is **provably not delivered**: the provider returned a
+  result carrying `error.dispatched is False`, or the transport classified its own failure as
+  definite non-delivery. After a confirmed submit, after an ambiguous result
   (`UNKNOWN_SUBMISSION`) or after any terminal success, the reservation becomes spend and is
   never refunded — a replay is never refunded either, because a replay never reserved.
+
+  > **Corrected in Phase 3C.2.3.2.** This milestone originally treated *any* exception from
+  > `transport.send()` as proof the frame never left. That is unsound once
+  > `websocket.send()` has been entered, where an exception can follow a partial write or a
+  > lost acknowledgement. Delivery is now classified explicitly
+  > (`DEFINITELY_NOT_SENT` / `MAY_HAVE_BEEN_SENT` / `SENT`); only the first releases budget.
+  > See `docs/19-PHASE3C232-RETRY-DELIVERY-FILESYSTEM-CLOSURE.md` §2.
 * The reservation is tracked through the ambiguity window: `_mark_unknown()` and the
   `UNKNOWN_SUBMISSION` branch settle, the `dispatched: false` branch releases *before*
   settling, and `snapshot()` now reports `budget` alongside the job list so an operator can see

@@ -83,6 +83,7 @@ from app.flow.trust import (
     spending_controls_from_settings,
     trust_status_payload,
 )
+from app.flow.delivery import DeliveryOutcome, DeliveryUncertain
 from app.flow.coordinator import (
     CoordinatorError,
     FlowJob,
@@ -324,8 +325,8 @@ class BridgeTransport:
     def __init__(self, bridge: "FlowBridge") -> None:
         self.bridge = bridge
 
-    async def send(self, envelope: proto.CommandEnvelope) -> None:
-        await self.bridge.send_command(envelope)
+    async def send(self, envelope: proto.CommandEnvelope) -> DeliveryOutcome:
+        return await self.bridge.send_command(envelope)
 
     async def await_result(
         self, command_id: str, timeout: float
@@ -1294,19 +1295,42 @@ class FlowBridge:
             raise CoordinatorError(descriptor.message, details={"code": descriptor.code.value})
         return dict(result.result)
 
-    async def send_command(self, envelope: proto.CommandEnvelope) -> None:
+    async def send_command(self, envelope: proto.CommandEnvelope) -> DeliveryOutcome:
+        """Send one frame, classifying what can honestly be said about delivery.
+
+        Phase 3C.2.3.2. Everything before ``websocket.send()`` is provable
+        non-delivery: the allowlist is checked locally and the session must be
+        authenticated, and neither can move a byte. Once the socket operation is
+        entered, an exception is **ambiguous** — a closed socket, a partial write or
+        a lost acknowledgement can all happen after bytes have moved — so it is
+        reported as :class:`DeliveryUncertain` and the coordinator keeps the spend.
+        """
+        # Pre-send refusals: `CommandDenied` and `NotPaired` both declare
+        # DEFINITELY_NOT_SENT, because nothing has been handed to the socket yet.
         proto.ensure_allowed(envelope.command)
         session = self.session
         if session is None or not session.authenticated:
             raise NotPaired()
+        frame = envelope.model_dump_json()
         loop = asyncio.get_running_loop()
-        session.pending[envelope.id] = loop.create_future()
+        future = loop.create_future()
+        session.pending[envelope.id] = future
         self.stats["commands_sent"] += 1
         try:
-            await session.websocket.send(envelope.model_dump_json())
-        except Exception:
-            session.pending.pop(envelope.id, None)
-            raise
+            await session.websocket.send(frame)
+        except Exception as exc:
+            # The pending future is removed because no answer can arrive for a frame
+            # whose send raised — but that is a *cleanup*, not a claim that nothing
+            # was sent. The classification says so.
+            if session.pending.get(envelope.id) is future:
+                session.pending.pop(envelope.id, None)
+            if not future.done():
+                future.cancel()
+            raise DeliveryUncertain(
+                "The command frame could not be confirmed as sent; delivery is unknown.",
+                details={"transport": type(exc).__name__},
+            ) from exc
+        return DeliveryOutcome.SENT
 
     async def await_result(self, command_id: str, timeout: float) -> proto.ResultEnvelope:
         session = self.session

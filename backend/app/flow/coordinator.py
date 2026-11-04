@@ -30,6 +30,11 @@ from datetime import datetime
 from typing import Any, Awaitable, Callable, Literal, Protocol
 
 from app.flow import protocol as proto
+from app.flow.delivery import (
+    DeliveryOutcome,
+    classify_send_exception,
+    classify_send_result,
+)
 from app.flow.protocol import (
     CommandEnvelope,
     ErrorDescriptor,
@@ -84,6 +89,9 @@ class NotPaired(CoordinatorError):
     """No authenticated extension session is attached to the bridge."""
 
     code = FlowErrorCode.NOT_PAIRED.value
+    #: Phase 3C.2.3.2 — the session check happens before the socket operation, so a
+    #: missing session is provable non-delivery.
+    delivery = DeliveryOutcome.DEFINITELY_NOT_SENT
 
     def __init__(self) -> None:
         super().__init__(
@@ -169,9 +177,16 @@ from app.flow.trust import UntrustedArtifact  # noqa: E402  (after proto import)
 
 
 class CommandTransport(Protocol):
-    """The only I/O the coordinator needs. The bridge implements it over WS."""
+    """The only I/O the coordinator needs. The bridge implements it over WS.
 
-    async def send(self, envelope: CommandEnvelope) -> None: ...
+    Phase 3C.2.3.2: ``send`` may return a :class:`~app.flow.delivery.DeliveryOutcome`
+    (``None`` means "completed"), and it may raise
+    :class:`~app.flow.delivery.DefiniteNonDelivery` or
+    :class:`~app.flow.delivery.DeliveryUncertain`. A transport that raises anything
+    else is treated as **ambiguous** — the frame may have left.
+    """
+
+    async def send(self, envelope: CommandEnvelope) -> Any: ...
 
     async def await_result(self, command_id: str, timeout: float) -> ResultEnvelope: ...
 
@@ -188,7 +203,14 @@ class FlowJob:
     request: GenerationCommand
     approval_binding: str
     state: SubmissionState = SubmissionState.PENDING
+    #: ``True`` whenever the command may have reached the provider. It is ``False``
+    #: only when the transport *proved* nothing was sent (or nothing was attempted),
+    #: never merely because the send raised. :attr:`delivery` carries the exact
+    #: classification; this boolean is the safe-direction summary of it.
     dispatched: bool = False
+    #: Phase 3C.2.3.2: the transport's own classification of the last send attempt.
+    #: ``None`` means no send has been attempted for this job yet.
+    delivery: DeliveryOutcome | None = None
     attempts: int = 0
     media_id: str = ""
     media_fingerprint: str = ""
@@ -218,6 +240,7 @@ class FlowJob:
             "state": self.state.value,
             "lifecycle": self.lifecycle.value,
             "dispatched": self.dispatched,
+            "delivery": self.delivery.value if self.delivery is not None else None,
             "attempts": self.attempts,
             "prompt_hash": self.request.prompt_hash(),
             "request_hash": self.request_hash,
@@ -325,6 +348,26 @@ class GenerationCoordinator:
             "jobs": [job.as_dict() for job in self.jobs[:20]],
         }
 
+    # ---------------------------------------------------------------- checks
+    def _require_trust(self) -> None:
+        """Refuse unless the current trust decision is trusted *and* fresh.
+
+        Phase 3C.2.3.2: retries call this too, so an expired or withdrawn decision
+        blocks a retry exactly as it blocks a first submission.
+        """
+        if self.trust_provider is None:
+            return
+        decision = self.trust_provider()
+        if not getattr(decision, "trusted", False) or not getattr(
+            decision, "is_fresh", lambda: True
+        )():
+            state = getattr(decision, "state", "UNVERIFIED")
+            raise UntrustedArtifact(
+                "The installed extension is not verified, so no generation may be "
+                f"dispatched (trust state {state}).",
+                details={"trust_state": state},
+            )
+
     # ------------------------------------------------------------- budget
     def _release_reservation(self, job_id: str) -> None:
         """Refund a reservation only when the attempt provably never left."""
@@ -360,17 +403,7 @@ class GenerationCoordinator:
             raise LiveGenerationDisabled()
         # Every refusal below happens *before* a reservation and before a request
         # is built, so a blocked generation costs nothing and writes nothing.
-        if self.trust_provider is not None:
-            decision = self.trust_provider()
-            if not getattr(decision, "trusted", False) or not getattr(
-                decision, "is_fresh", lambda: True
-            )():
-                state = getattr(decision, "state", "UNVERIFIED")
-                raise UntrustedArtifact(
-                    "The installed extension is not verified, so no generation may be "
-                    f"dispatched (trust state {state}).",
-                    details={"trust_state": state},
-                )
+        self._require_trust()
         if not approval_binding:
             raise ApprovalRequired()
 
@@ -439,31 +472,10 @@ class GenerationCoordinator:
             request_hash=request.request_hash(),
         )
 
-        try:
-            await self.transport.send(envelope)
-        except Exception as exc:  # noqa: BLE001 - transport failure before dispatch
-            # The frame never left, so the reservation is returned. This is the only
-            # pre-dispatch failure path, and it is the only place a refund happens.
-            self._release_reservation(job.job_id)
-            job.state = SubmissionState.FAILED
-            job.dispatched = False
-            job.attempts = 1
-            job.error = ErrorDescriptor(
-                FlowErrorCode.EXTENSION_DISCONNECTED,
-                "The command could not be delivered, so no generation was dispatched.",
-                retryable=True,
-                details={"transport": type(exc).__name__},
-            )
-            job.updated_at = self.clock()
-            return job
-
-        # From this line on, the submit action exists in the world. The reservation
-        # stays tracked until the outcome is known, so the *only* refund that can
-        # happen later is a provider statement that nothing was dispatched.
-        job.dispatched = True
         job.attempts = 1
-        job.state = SubmissionState.DISPATCHED
-        job.updated_at = self.clock()
+        delivered = await self._deliver(job, envelope)
+        if delivered is not None:
+            return delivered
 
         try:
             result = await self.transport.await_result(envelope.id, self.command_timeout)
@@ -473,6 +485,88 @@ class GenerationCoordinator:
             return self._mark_unknown(job, f"transport failed after dispatch ({type(exc).__name__})")
 
         return self._apply_submission_result(job, result)
+
+    async def _deliver(self, job: FlowJob, envelope: CommandEnvelope) -> FlowJob | None:
+        """Send one attempt and classify what the transport could establish.
+
+        Returns ``None`` when the frame was sent (the caller then waits for a
+        result), or the finished job when it was not. Phase 3C.2.3.2:
+
+        * **definitely not sent** — the only case that refunds; the job becomes
+          ``FAILED`` with ``dispatched=False`` and is retryable;
+        * **may have been sent** — the reservation is settled (it may already be
+          billable), ``dispatched=True``, and the job becomes
+          ``UNKNOWN_SUBMISSION``, which is never retryable;
+        * **sent** — the reservation stays tracked until the result arrives.
+        """
+        try:
+            raw = await self.transport.send(envelope)
+        except Exception as exc:  # noqa: BLE001 - classification decides, not the type
+            outcome = classify_send_exception(exc)
+            job.delivery = outcome
+            if outcome is DeliveryOutcome.DEFINITELY_NOT_SENT:
+                self._release_reservation(job.job_id)
+                job.dispatched = False
+                job.state = SubmissionState.FAILED
+                job.error = ErrorDescriptor(
+                    FlowErrorCode.EXTENSION_DISCONNECTED,
+                    "The command was provably not sent, so no generation was "
+                    "dispatched and the budget reservation was released.",
+                    retryable=True,
+                    details={"transport": type(exc).__name__, "delivery": outcome.value},
+                )
+                job.updated_at = self.clock()
+                return job
+            # Ambiguous: the frame may have moved. Keep the spend, refuse retries.
+            self._settle_reservation(job.job_id)
+            job.dispatched = True
+            job.state = SubmissionState.UNKNOWN_SUBMISSION
+            job.error = ErrorDescriptor(
+                FlowErrorCode.UNKNOWN_SUBMISSION,
+                "The command send failed in a way that does not prove the frame was "
+                "not delivered. The attempt is treated as possibly billed and is "
+                "never retried automatically.",
+                retryable=False,
+                details={"transport": type(exc).__name__, "delivery": outcome.value},
+            )
+            job.updated_at = self.clock()
+            return job
+
+        outcome = classify_send_result(raw)
+        job.delivery = outcome
+        if outcome is DeliveryOutcome.DEFINITELY_NOT_SENT:
+            # A transport may answer "not sent" without raising; honour it.
+            self._release_reservation(job.job_id)
+            job.dispatched = False
+            job.state = SubmissionState.FAILED
+            job.error = ErrorDescriptor(
+                FlowErrorCode.EXTENSION_DISCONNECTED,
+                "The transport reported that the command was not sent, so the budget "
+                "reservation was released.",
+                retryable=True,
+                details={"delivery": outcome.value},
+            )
+            job.updated_at = self.clock()
+            return job
+        if outcome is DeliveryOutcome.MAY_HAVE_BEEN_SENT:
+            # Returned without raising, but the transport will not claim delivery.
+            self._settle_reservation(job.job_id)
+            job.dispatched = True
+            job.state = SubmissionState.UNKNOWN_SUBMISSION
+            job.error = ErrorDescriptor(
+                FlowErrorCode.UNKNOWN_SUBMISSION,
+                "The transport could not establish that the command was delivered, so "
+                "the attempt is treated as possibly billed and is never retried.",
+                retryable=False,
+                details={"delivery": outcome.value},
+            )
+            job.updated_at = self.clock()
+            return job
+
+        job.dispatched = True
+        job.state = SubmissionState.DISPATCHED
+        job.updated_at = self.clock()
+        return None
 
     def _apply_submission_result(self, job: FlowJob, result: ResultEnvelope) -> FlowJob:
         if result.job_id and result.job_id != job.job_id:
@@ -507,6 +601,7 @@ class GenerationCoordinator:
             # been billed even though it produced nothing.
             self._release_reservation(job.job_id)
             job.dispatched = False
+            job.delivery = DeliveryOutcome.DEFINITELY_NOT_SENT
             job.state = SubmissionState.FAILED
             job.error = ErrorDescriptor(
                 descriptor.code, descriptor.message, retryable=True, details=descriptor.details
@@ -623,54 +718,108 @@ class GenerationCoordinator:
 
     # ----------------------------------------------------------------- retry
     async def retry(self, job_id: str, *, approval_binding: str) -> FlowJob:
-        """Retry only a proven no-dispatch failure. Unknown submissions stay put."""
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise CoordinatorError("Unknown Flow job.", details={"job_id": job_id})
-        if job.state is SubmissionState.UNKNOWN_SUBMISSION:
-            raise UnknownSubmissionRemains(job.job_id)
-        if job.state is not SubmissionState.FAILED:
-            raise CoordinatorError(
-                "Only a failed attempt can be retried.",
-                details={"state": job.state.value},
-            )
-        if job.dispatched:
-            # Even a FAILED state that was dispatched is ambiguous by construction.
-            job.state = SubmissionState.UNKNOWN_SUBMISSION
-            raise UnknownSubmissionRemains(job.job_id)
+        """Retry only a *proven* no-dispatch failure, as a new budgeted attempt.
+
+        Phase 3C.2.3.2. Before this change a retry checked less than a submission:
+        it never re-read the live flag before mutating the job, never re-checked the
+        trust decision, and never reserved. A FAILED job could therefore be retried
+        without limit and without any spend.
+
+        The rules now, in order:
+
+        1. live generation must be enabled;
+        2. the current trust decision must be trusted **and fresh** — an expired
+           decision blocks a retry exactly as it blocks a first submission;
+        3. the job must exist and be ``FAILED``;
+        4. its last attempt must be *positively* recorded as not dispatched
+           (:attr:`DeliveryOutcome.DEFINITELY_NOT_SENT`). ``UNKNOWN_SUBMISSION`` is
+           never retryable, and neither is a ``FAILED`` job whose send was ambiguous;
+        5. an approval binding is required;
+        6. under the coordinator lock, the state transition to ``PENDING`` is the
+           exclusive right to dispatch: a second concurrent retry sees a non-FAILED
+           job and is refused, so two retries can never both reserve or both send;
+        7. a **fresh** reservation is taken from the same ledger the submit path
+           uses. The previous attempt's reservation was released or settled; a retry
+           never reuses it.
+        """
         if not self.live_generation_enabled:
             raise LiveGenerationDisabled()
+        self._require_trust()
         if not approval_binding:
             raise ApprovalRequired()
 
-        job.attempts += 1
-        job.state = SubmissionState.PENDING
-        job.approval_binding = approval_binding
-        job.error = None
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise CoordinatorError("Unknown Flow job.", details={"job_id": job_id})
+            if job.state is SubmissionState.UNKNOWN_SUBMISSION:
+                raise UnknownSubmissionRemains(job.job_id)
+            if job.state is not SubmissionState.FAILED:
+                raise CoordinatorError(
+                    "Only a failed attempt can be retried.",
+                    details={"state": job.state.value},
+                )
+            if job.dispatched or job.delivery is not DeliveryOutcome.DEFINITELY_NOT_SENT:
+                # ``FAILED`` is not enough on its own: the previous attempt must have
+                # been proven not to have left. Anything else is ambiguity, and an
+                # ambiguous attempt is never resubmitted.
+                job.state = SubmissionState.UNKNOWN_SUBMISSION
+                job.error = ErrorDescriptor(
+                    FlowErrorCode.UNKNOWN_SUBMISSION,
+                    "The previous attempt cannot be proven not to have been "
+                    "dispatched, so it is treated as possibly billed and is not "
+                    "retried.",
+                    retryable=False,
+                    details={"delivery": (job.delivery.value if job.delivery else "unknown")},
+                )
+                job.updated_at = self.clock()
+                raise UnknownSubmissionRemains(job.job_id)
+
+            attempt = job.attempts + 1
+            estimate = (
+                self.budget_ledger.reserve(kind=job.kind)
+                if self.budget_ledger is not None
+                else 0.0
+            )
+            try:
+                # The state change is the dispatch token: it happens inside the lock
+                # with the reservation, so nothing else can claim this job.
+                job.attempts = attempt
+                job.state = SubmissionState.PENDING
+                job.approval_binding = approval_binding
+                job.error = None
+                job.delivery = None
+                job.dispatched = False
+                if estimate:
+                    self._reservations[job.job_id] = estimate
+                job.updated_at = self.clock()
+            except BaseException:
+                if estimate and self.budget_ledger is not None:
+                    self.budget_ledger.release(estimate)
+                raise
 
         envelope = CommandEnvelope(
             id=new_id(),
             command="generate_image" if job.kind == "image" else "generate_video",
             job_id=job.job_id,
-            payload={**job.request.model_dump(), "count": 1, "retry_attempt": job.attempts},
+            payload={
+                **job.request.model_dump(),
+                "count": 1,
+                "one_attempt_only": True,
+                "retry_attempt": job.attempts,
+            },
             issued_at=iso(self.clock()),
-            expires_at=iso(self.clock()),
+            expires_at=iso(
+                datetime.fromtimestamp(
+                    self.clock().timestamp() + self.command_timeout, tz=self.clock().tzinfo
+                )
+            ),
             request_hash=job.request.request_hash(),
         )
-        try:
-            await self.transport.send(envelope)
-        except Exception:  # noqa: BLE001
-            job.state = SubmissionState.FAILED
-            job.error = ErrorDescriptor(
-                FlowErrorCode.EXTENSION_DISCONNECTED,
-                "The retry could not be delivered; no generation was dispatched.",
-                retryable=True,
-            )
-            job.updated_at = self.clock()
-            return job
+        delivered = await self._deliver(job, envelope)
+        if delivered is not None:
+            return delivered
 
-        job.dispatched = True
-        job.state = SubmissionState.DISPATCHED
         try:
             result = await self.transport.await_result(envelope.id, self.command_timeout)
         except asyncio.TimeoutError:

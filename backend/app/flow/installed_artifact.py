@@ -254,15 +254,40 @@ class MeasurementReport:
 #: that is renamed, replaced or turned into a symlink mid-scan cannot redirect a
 #: read. Platforms without these primitives are refused rather than downgraded to
 #: path-based checks, which cannot make the same guarantee.
-DIR_FD_SUPPORTED = bool(
-    getattr(os, "O_DIRECTORY", 0)
-    and hasattr(os, "supports_dir_fd")
-    and hasattr(os, "supports_fd")
-    and os.open in os.supports_dir_fd
-    and os.stat in os.supports_dir_fd
-    and os.stat in os.supports_follow_symlinks
-    and os.scandir in os.supports_fd
+#:
+#: Phase 3C.2.3.2: the check now names every primitive the guarantee depends on,
+#: including ``O_NOFOLLOW``. Using ``getattr(os, "O_NOFOLLOW", 0)`` in the flags was
+#: a silent downgrade: on a platform without ``O_NOFOLLOW`` the flag would have been
+#: 0 and every open would have *followed* a symlink while the code still claimed
+#: descriptor-relative, no-follow traversal.
+_DIR_FD_PRIMITIVES = (
+    "O_NOFOLLOW",
+    "O_DIRECTORY",
 )
+
+
+def _descriptor_traversal_available() -> bool:
+    """Every primitive the no-follow descriptor traversal depends on, named.
+
+    Phase 3C.2.3.2: ``O_NOFOLLOW`` is part of the contract, not an optional extra.
+    The earlier expression used ``getattr(os, "O_NOFOLLOW", 0)`` inside the open
+    flags, so a platform without it would have opened symlinks while the report
+    still claimed no-follow traversal.
+    """
+    if not all(getattr(os, flag, 0) for flag in _DIR_FD_PRIMITIVES):
+        return False
+    if not (hasattr(os, "supports_dir_fd") and hasattr(os, "supports_fd")):
+        return False
+    if not (os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd):
+        return False
+    if os.stat not in os.supports_follow_symlinks or not hasattr(os, "fstat"):
+        return False
+    if not hasattr(os, "scandir") or os.scandir not in os.supports_fd:
+        return False
+    return True
+
+
+DIR_FD_SUPPORTED = _descriptor_traversal_available()
 
 _OPEN_DIR_FLAGS = (
     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -280,12 +305,22 @@ def _require_descriptor_traversal() -> None:
             "so the traversal race guarantees cannot be made. Crusor refuses to "
             "measure rather than fall back to path-based checks that look equivalent "
             "and are not.",
-            details={"platform": sys.platform, "o_directory": bool(getattr(os, "O_DIRECTORY", 0))},
+            details={
+                "platform": sys.platform,
+                "o_directory": bool(getattr(os, "O_DIRECTORY", 0)),
+                "o_nofollow": bool(getattr(os, "O_NOFOLLOW", 0)),
+                "scandir_on_fd": bool(hasattr(os, "scandir") and os.scandir in os.supports_fd),
+            },
         )
 
 
 def _open_root_dir(root: Path) -> int:
-    """Open the configured root itself, refusing a symlink at that last component."""
+    """Open the configured root itself, refusing a symlink at that last component.
+
+    Kept for callers that already hold a validated absolute path; :meth:`measure`
+    acquires the root with :func:`_open_root_through_anchor` instead, which never
+    resolves more than one component per ``openat``.
+    """
     try:
         return os.open(str(root), _OPEN_DIR_FLAGS)
     except OSError as exc:
@@ -302,7 +337,79 @@ def _open_root_dir(root: Path) -> int:
         ) from exc
 
 
-def _open_child_dir(parent_fd: int, name: str, relative: str) -> int:
+def _open_root_through_anchor(root: Path) -> int:
+    """Acquire the root one component at a time from the filesystem root.
+
+    Phase 3C.2.3.2. A single ``os.open("/a/b/c", O_NOFOLLOW)`` protects only the
+    *last* component: every ancestor is resolved by the kernel from a string the
+    process no longer controls. Walking from a trusted anchor (``/``) with one
+    ``openat`` per component means a component cannot be swapped for a symlink or a
+    different directory between the check and the open — each step is
+    descriptor-relative and no-follow, and each verifies that the descriptor it
+    got is the entry the parent currently names.
+    """
+    parts = [part for part in root.parts if part not in ("/", "")]
+    if not parts or any(part in (".", "..") for part in parts):
+        raise MeasurementError(
+            "unsafe_relative_path",
+            f"The installation root {str(root)!r} is not a plain path below the "
+            "filesystem root, so it cannot be walked safely.",
+            details={"root": str(root)},
+        )
+    try:
+        fd = os.open("/", _OPEN_DIR_FLAGS)
+    except OSError as exc:  # pragma: no cover - no / means no filesystem
+        raise MeasurementError(
+            "unsupported_platform",
+            f"The filesystem root could not be opened: {exc.strerror}.",
+            details={"platform": sys.platform},
+        ) from exc
+
+    walked = ""
+    try:
+        for part in parts:
+            walked = f"{walked}/{part}"
+            child = _open_child_dir(
+                fd, part, walked, missing_code="installed_artifact_not_found"
+            )
+            os.close(fd)
+            fd = child
+    except BaseException:
+        os.close(fd)
+        raise
+
+    # What the walk acquired must still be what the configured path names.
+    try:
+        named = os.lstat(root)
+    except OSError as exc:
+        os.close(fd)
+        raise MeasurementError(
+            "installed_artifact_not_found",
+            f"The configured installation {str(root)!r} disappeared while it was opened.",
+            details={"root": str(root)},
+        ) from exc
+    measured = os.fstat(fd)
+    if stat.S_ISLNK(named.st_mode) or (named.st_dev, named.st_ino) != (
+        measured.st_dev,
+        measured.st_ino,
+    ):
+        os.close(fd)
+        raise MeasurementError(
+            "root_replaced_during_measurement",
+            f"The configured installation {str(root)!r} is not the directory that was "
+            "opened by walking down from the filesystem root.",
+            details={"root": str(root)},
+        )
+    return fd
+
+
+def _open_child_dir(
+    parent_fd: int,
+    name: str,
+    relative: str,
+    *,
+    missing_code: str = "directory_replaced_during_measurement",
+) -> int:
     """Open ``name`` relative to ``parent_fd``; a symlink is never followed."""
     try:
         child = os.open(name, _OPEN_DIR_FLAGS, dir_fd=parent_fd)
@@ -314,7 +421,7 @@ def _open_child_dir(parent_fd: int, name: str, relative: str) -> int:
                 details={"path": relative},
             ) from exc
         raise MeasurementError(
-            "directory_replaced_during_measurement",
+            missing_code,
             f"{relative} could not be opened as a directory: {exc.strerror}.",
             details={"path": relative},
         ) from exc
@@ -498,6 +605,7 @@ def _scan_directory(
             if name in exclusions:
                 continue
             child = _open_child_dir(fd, name, relative)
+            child_stat = os.fstat(child)
             try:
                 _scan_directory(
                     child,
@@ -508,6 +616,24 @@ def _scan_directory(
                 )
             finally:
                 os.close(child)
+            # Phase 3C.2.3.2: the recursive scan read the directory through its own
+            # descriptor. That proves the *contents*; it does not prove the parent
+            # entry still names the same directory. A same-name replacement keeps the
+            # entry list identical, so it can only be caught by comparing identities.
+            try:
+                current = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except OSError as exc:
+                raise MeasurementError(
+                    "directory_replaced_during_measurement",
+                    f"{relative} disappeared while it was being measured.",
+                    details={"path": relative},
+                ) from exc
+            if (current.st_dev, current.st_ino) != (child_stat.st_dev, child_stat.st_ino):
+                raise MeasurementError(
+                    "directory_replaced_during_measurement",
+                    f"{relative} was replaced by a different directory during measurement.",
+                    details={"path": relative},
+                )
             continue
         if not stat.S_ISREG(mode):
             raise MeasurementError(
@@ -745,7 +871,9 @@ class InstalledArtifactVerifier:
         spec = spec.validate()
         _require_descriptor_traversal()
         root = self._validate_root(spec.root)
-        root_fd = _open_root_dir(root)
+        # Phase 3C.2.3.2: the root is acquired one component at a time from the
+        # filesystem root, so no ancestor is resolved from a string by the kernel.
+        root_fd = _open_root_through_anchor(root)
         try:
             return self._measure_open_root(root=root, root_fd=root_fd, spec=spec)
         finally:

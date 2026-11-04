@@ -43,7 +43,8 @@ alone could not fix it — kombu had to be pinned too.
 
 ### The result, from GitHub Actions
 
-Run **41870446667** on commit `4eb1e28`, all four jobs green:
+Run **41872857374** on commit `13a9d80` (and its pull-request twin 41872868695),
+all four jobs green:
 
 | Job | Result |
 | --- | --- |
@@ -310,7 +311,7 @@ added or sharpened:
 ## 9. Release recommendation
 
 ```text
-CI (PostgreSQL 16 + pgvector + Redis + Celery round-trip):  GREEN — run 41870446667
+CI (PostgreSQL 16 + pgvector + Redis + Celery round-trip):  GREEN — run 41872857374
 DIRECTOR LIFECYCLE:      EXECUTED END-TO-END, GOVERNANCE CHECKS PASS
 CREATIVE PROVIDERS:      BLOCKED — no credentials, no egress
 SOCIAL OAUTH:            BLOCKED — no credentials, no vault, no egress

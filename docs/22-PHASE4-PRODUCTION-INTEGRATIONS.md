@@ -287,12 +287,12 @@ policy, role boundaries.
 | --- | --- |
 | Phase 4 integrations module | **44 passed** |
 | Phase 4.1 scheduler module | **7 passed** |
-| Acceptance | **65/65**, `generated_at 2026-11-04T09:24:19Z` (Phase 4 run) |
+| Acceptance | **65/65**, `generated_at 2026-11-04T10:43:57Z` |
 | Full backend suite | **1204 passed in 556.02s**, 0 failed (10:24:35Z → 10:33:54Z) |
 | Migration | `d5e6f7a8b9c0 → e6f7a8b9c0d1` up → down → up, head `e6f7a8b9c0d1` |
 | Frontend types | `npx tsc --noEmit` exit 0 |
 | Frontend build | `index-Bqzo970z.js` 411.77 kB (gzip 112.31 kB) |
-| Source audit | `RESULT blocked (SOURCE_ABSENT)`, exit 3 |
+| Source audit | `RESULT blocked (SOURCE_ABSENT)`, exit 3 (10:44:26Z) |
 | Acceptance suite | 65/65 (see §7 for the run attached to this commit) |
 
 Docker and GitHub Actions were **not executed** in this environment; both are

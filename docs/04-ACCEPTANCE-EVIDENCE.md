@@ -391,7 +391,8 @@ the raw preflight output is `preflight.json` and the regenerated matrix is
 | Credential presence and shape | `scripts/provision_credentials.py check` | every tier `MISSING` (core, vault, oauth_redirect, llm, creative_image, creative_video, publishing, 6 social, 3 ads); exit 2 |
 | Vault key generation | `scripts/provision_credentials.py keygen --out /tmp/…` | 64-hex key in a `0600` file, value never printed, existing file refused, repo paths refused; test file deleted |
 | Provisioning refusal paths (18 tests) | `pytest tests/test_phase4_4_provisioning.py` | **18 passed** — no values leak, DNS-failure structure, policy-block vs certificate classification, static guard that `CERT_NONE`/`check_hostname=False` never appear, keygen modes, every shape validator, empty vs complete env, deterministic rendering of a blocked host / an unblocked host / a multi-host provider |
-| Full backend suite, SQLite | `pytest tests` | **1310 passed**, 0 failures (see run log) |
+| Full backend suite, SQLite | `pytest tests` | **1310 passed**, 0 failures (612.7 s local) |
+| CI, all four jobs | runs 41890092445 (push) and 41890105298 (PR) on `0997222` | **success** — backend SQLite `1310 passed in 564.23 s`; PostgreSQL 16 + pgvector + Redis job green; frontend build and the no-credentials guard green |
 | Director lifecycle, live server | `scripts/lifecycle_evidence.py --base-url http://127.0.0.1:8000 --write` | 7/7 governance checks pass; 25 trace entries; 26 checkpoints; runtime recorded as `real_providers_in_use: false`, `creative_provider: mock`, `publishing: unavailable` |
 
 ### The egress finding, stated precisely

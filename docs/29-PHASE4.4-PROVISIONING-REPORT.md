@@ -255,8 +255,15 @@ Phase 4.4 stops here, at two external blockers, neither of which is code:
 
 Everything that could be built without them is built and tested: the preflight
 (`environment_preflight.py`), the provisioning tool (`provision_credentials.py`),
-the canary harness, the lifecycle evidence runner, the six-column matrix, and 32
-new tests covering their refusal paths (suite: 1310 passed on SQLite).
+the canary harness, the lifecycle evidence runner, the six-column matrix, and 18
+new tests covering their refusal paths.
+
+The first CI run on this work failed, and the failure was real: the preflight
+renderer printed only a provider's first host, so a two-host provider could hide a
+failing one behind it, and the matching test asserted live-network output — it
+would have passed here and failed on any host with egress. Both are fixed; CI is
+green on `0997222`: backend SQLite **1310 passed**, PostgreSQL 16 + pgvector +
+Redis green, frontend build and the no-credentials guard green.
 
 ```text
 ENVIRONMENT PREFLIGHT:   MEASURED — DNS ok, TCP ok, TLS blocked for every provider

@@ -151,12 +151,22 @@ class CommandResultIn(BaseModel):
                     "provider_dispatch 'not_dispatched' requires a correlated result; "
                     f"missing: {', '.join(missing)}."
                 )
-            if self.error is not None and isinstance(self.error, dict):
-                if error.get("dispatched") is not False:
-                    raise ValueError(
-                        "provider_dispatch 'not_dispatched' requires an explicit "
-                        "boolean error.dispatched == false."
-                    )
+            # Phase 3C.2.3.4.1: the explicit refusal is required, not merely checked
+            # when present. `error=None` used to skip this branch entirely, so a
+            # payload with valid-looking correlation fields and no error object could
+            # carry `provider_dispatch: "not_dispatched"` without stating the boolean
+            # that is supposed to justify it.
+            if not isinstance(self.error, dict):
+                raise ValueError(
+                    "provider_dispatch 'not_dispatched' requires an error object whose "
+                    "'dispatched' field is explicitly the boolean false; none was "
+                    "supplied."
+                )
+            if error.get("dispatched") is not False:
+                raise ValueError(
+                    "provider_dispatch 'not_dispatched' requires an explicit "
+                    "boolean error.dispatched == false."
+                )
         return self
 
 

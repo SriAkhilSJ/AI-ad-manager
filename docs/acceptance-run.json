@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-04T06:16:21Z",
+  "generated_at": "2026-11-04T06:50:53Z",
   "base_url": "http://127.0.0.1:8000",
   "passed": 65,
   "total": 65,
@@ -7,7 +7,7 @@
     {
       "criterion": "1. Backend starts",
       "passed": true,
-      "detail": "liveness 200 (uptime 16.9s); /system/status reachable pre-auth -> 200"
+      "detail": "liveness 200 (uptime 13.0s); /system/status reachable pre-auth -> 200"
     },
     {
       "criterion": "1b. /system/status reports every integration honestly",
@@ -32,22 +32,22 @@
     {
       "criterion": "5. Director initialises a stateful workflow",
       "passed": true,
-      "detail": "15 nodes, interrupt at human_approval; workflow wf_a1057c1debe84fca produced 3 drafts in 8 iterations and is awaiting approval"
+      "detail": "15 nodes, interrupt at human_approval; workflow wf_769b77ddb31e4392 produced 3 drafts in 8 iterations and is awaiting approval"
     },
     {
       "criterion": "6. All six agents invocable through structured interfaces",
       "passed": true,
-      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run 0e6d12ae\u2026, 3 trace events)"
+      "detail": "6 agents expose limits + responsibilities; research run -> succeeded (run 5301ea4a\u2026, 3 trace events)"
     },
     {
       "criterion": "7. Workflow state persists across restarts",
       "passed": true,
-      "detail": "a fresh process reconstructed thread wf_a1057c1debe84fca: 23 checkpoints, identical plan and content ids"
+      "detail": "a fresh process reconstructed thread wf_769b77ddb31e4392: 23 checkpoints, identical plan and content ids"
     },
     {
       "criterion": "8. Content create + immutable version history",
       "passed": true,
-      "detail": "content c3d67353\u2026 now at v2 with distinct content hashes"
+      "detail": "content 8ba8688d\u2026 now at v2 with distinct content hashes"
     },
     {
       "criterion": "9. Approval state machine + invalidation on edit",
@@ -62,12 +62,12 @@
     {
       "criterion": "11. Model usage and cost are recordable",
       "passed": true,
-      "detail": "usage ledger 223733 -> 225333 tokens, $0.1344 -> $0.1386 across 2 provider row(s)"
+      "detail": "usage ledger 232103 -> 233703 tokens, $0.1386 -> $0.1428 across 2 provider row(s)"
     },
     {
       "criterion": "12. Automated test suite passes",
       "passed": true,
-      "detail": "1137 tests, 0 failures, 0 errors"
+      "detail": "1153 tests, 0 failures, 0 errors"
     },
     {
       "criterion": "13. Architecture documentation is complete",
@@ -102,7 +102,7 @@
     {
       "criterion": "19. Director orchestrates agents and gates on approval",
       "passed": true,
-      "detail": "workflow strat_7b432eca71d44d1d: 7 trace entries (reused 1206 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
+      "detail": "workflow strat_692277b2ce67499d: 7 trace entries (reused 1242 existing findings, no duplicate spend); verdict=sufficient; interrupted then approved; strategy v1"
     },
     {
       "criterion": "20. Usage, cost and budget enforcement",
@@ -127,12 +127,12 @@
     {
       "criterion": "24. Drafts are platform-specific and campaign-linked",
       "passed": true,
-      "detail": "6 drafts linked to campaign 3b96b8a1-6738-43aa-b117-1b0ed962ad2a: linkedin/social_post 213ch, x/social_post 46ch, instagram/caption 163ch, youtube/short_form_video_script 324ch, facebook/social_post 185ch, reddit/community_discussion 406ch"
+      "detail": "6 drafts linked to campaign cec90a3b-e071-4ac6-942e-ff7d1f92a4ed: linkedin/social_post 213ch, x/social_post 46ch, instagram/caption 163ch, youtube/short_form_video_script 324ch, facebook/social_post 185ch, reddit/community_discussion 406ch"
     },
     {
       "criterion": "25. Brand Guardian validates drafts",
       "passed": true,
-      "detail": "verdict PASS after 18 rules; 2 validation row(s) persisted for version 7e9e8be6"
+      "detail": "verdict PASS after 18 rules; 2 validation row(s) persisted for version 495e6ae5"
     },
     {
       "criterion": "26. Unsupported claims are blocked",
@@ -142,12 +142,12 @@
     {
       "criterion": "27. Editing creates a new version",
       "passed": true,
-      "detail": "v1 -> v2; original version 7e9e8be6 unchanged"
+      "detail": "v1 -> v2; original version 495e6ae5 unchanged"
     },
     {
       "criterion": "28. Approval is version-bound and edits invalidate it",
       "passed": true,
-      "detail": "approval bound to version 1ef62d20; editing invalidated it while keeping 2 approval record(s) and the approved text intact"
+      "detail": "approval bound to version 1db268f2; editing invalidated it while keeping 2 approval record(s) and the approved text intact"
     },
     {
       "criterion": "29. Internal calendar can be updated",
@@ -177,12 +177,12 @@
     {
       "criterion": "34. Generation is idempotent",
       "passed": true,
-      "detail": "plan retry returned plan ceb2a6da with 6 slots; generate retry returned item 3d91af30"
+      "detail": "plan retry returned plan bfa721b7 with 6 slots; generate retry returned item 4b5b125a"
     },
     {
       "criterion": "35. Phase 1 and Phase 2 acceptance is intact",
       "passed": true,
-      "detail": "all 23 Phase 1/2 checks still pass alongside the Phase 3A criteria; studio overview reports 382 drafts"
+      "detail": "all 23 Phase 1/2 checks still pass alongside the Phase 3A criteria; studio overview reports 395 drafts"
     },
     {
       "criterion": "36. Creative briefs are creatable from a content version",
@@ -192,7 +192,7 @@
     {
       "criterion": "37. Mock image generation executes and is idempotent",
       "passed": true,
-      "detail": "job mock:1793772974:54c825a1323d0e4c:e\u2026 succeeded on mock at $0.0; replay returned the same job"
+      "detail": "job mock:1793775047:36362c97732221dc:e\u2026 succeeded on mock at $0.0; replay returned the same job"
     },
     {
       "criterion": "38. Video generation is labelled a poster, not a video",
@@ -217,12 +217,12 @@
     {
       "criterion": "42. Content, brief and asset versions are linked",
       "passed": true,
-      "detail": "asset v1 \u2192 brief v1 \u2192 content version f65c639b \u2192 job 80bd889a"
+      "detail": "asset v1 \u2192 brief v1 \u2192 content version 96237640 \u2192 job e6eaae37"
     },
     {
       "criterion": "43. Approval binds content + brief + asset and enforces invalidation",
       "passed": true,
-      "detail": "approval bound asset d0fe51f9 v1 + brief v1 + content version; selecting another asset invalidated 1 approval(s)"
+      "detail": "approval bound asset dfaa00a4 v1 + brief v1 + content version; selecting another asset invalidated 1 approval(s)"
     },
     {
       "criterion": "44. Flow is not falsely active and paid generation is disabled",
@@ -232,7 +232,7 @@
     {
       "criterion": "45. No creative publishing or scheduling endpoint exists",
       "passed": true,
-      "detail": "/publishing=404; /publish=404; /creative-studio/publish=404; /creative-studio/assets/d0fe51f9-f133-4b76-93a8-27cc6be0b431/publish=404; /creative-studio/schedule=404"
+      "detail": "/publishing=404; /publish=404; /creative-studio/publish=404; /creative-studio/assets/dfaa00a4-7dba-4b4a-88c0-ba74af09bfa0/publish=404; /creative-studio/schedule=404"
     },
     {
       "criterion": "46. Frontend build ships the Creative Studio UI",
@@ -242,7 +242,7 @@
     {
       "criterion": "47. Phase 1/2/2.5/2.6/3A acceptance is intact",
       "passed": true,
-      "detail": "all 47 earlier checks still pass; creative overview reports 89 assets (62 mock), 62 succeeded jobs"
+      "detail": "all 47 earlier checks still pass; creative overview reports 94 assets (65 mock), 65 succeeded jobs"
     },
     {
       "criterion": "48. Flow status is honest and live generation is off",
@@ -257,7 +257,7 @@
     {
       "criterion": "50. The local bridge binds loopback only and authenticates",
       "passed": true,
-      "detail": "0.0.0.0 bind refused; sockets 127.0.0.1:36901 and 127.0.0.1:33035; unauth=401, denied=403, bad_host=421, oversize=413, unpaired=503"
+      "detail": "0.0.0.0 bind refused; sockets 127.0.0.1:35703 and 127.0.0.1:37487; unauth=401, denied=403, bad_host=421, oversize=413, unpaired=503"
     },
     {
       "criterion": "51. The companion endpoint rejects unauthenticated callers",
@@ -267,7 +267,7 @@
     {
       "criterion": "52. Flow generation is blocked by the approval gate",
       "passed": true,
-      "detail": "generation refused with flow_approval_required (403) with and without dry_run; binding hash 09412347975f50ee\u2026 explains what a founder must approve"
+      "detail": "generation refused with flow_approval_required (403) with and without dry_run; binding hash 0d30eecac6d25b6a\u2026 explains what a founder must approve"
     },
     {
       "criterion": "53. The local companion has a safe executable module entry point",

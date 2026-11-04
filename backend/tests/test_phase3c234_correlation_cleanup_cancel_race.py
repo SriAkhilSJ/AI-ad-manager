@@ -42,6 +42,8 @@ from app.flow.coordinator import (
     correlate_result,
 )
 from app.flow.delivery import DeliveryOutcome, DispatchFailed, ProviderDispatchOutcome
+from pydantic import ValidationError
+
 from app.schemas.flow import CommandResultIn
 from app.services.flow_budget import FlowBudgetLedger
 
@@ -411,6 +413,83 @@ def test_the_schema_rejects_a_refusal_without_the_boolean():
             provider_dispatch="not_dispatched",
             error={"code": "x", "message": "y"},
         )
+
+
+_CORRELATED_REFUSAL: dict[str, Any] = {
+    "command_id": "c1",
+    "job_id": "j1",
+    "request_hash": "h" * 64,
+    "transport": "sent",
+    "provider_dispatch": "not_dispatched",
+}
+
+
+@pytest.mark.parametrize(
+    "case, error",
+    [
+        ("error is None", None),
+        ("error.dispatched is missing", {"code": "x", "message": "y"}),
+        ("error.dispatched is true", {"code": "x", "message": "y", "dispatched": True}),
+        ("error.dispatched is the string 'false'", {"dispatched": "false"}),
+        ("error.dispatched is the number 0", {"dispatched": 0}),
+        ("error.dispatched is null", {"dispatched": None}),
+    ],
+)
+def test_the_schema_requires_explicit_refusal_evidence(case, error):
+    """Phase 3C.2.3.4.1: `not_dispatched` needs the boolean, not its absence."""
+
+    with pytest.raises(ValidationError):
+        CommandResultIn(**_CORRELATED_REFUSAL, error=error)
+
+
+def test_the_schema_rejects_a_refusal_whose_error_is_not_an_object():
+    with pytest.raises(ValidationError):
+        CommandResultIn(**_CORRELATED_REFUSAL, error=["dispatched", False])
+
+
+def test_the_schema_accepts_a_correlated_refusal_with_the_boolean():
+    result = CommandResultIn(
+        **_CORRELATED_REFUSAL,
+        error={"code": "quota", "message": "no quota left", "dispatched": False},
+    )
+    assert result.provider_dispatch == "not_dispatched"
+    assert result.error is not None and result.error["dispatched"] is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"transport": "sent", "provider_dispatch": "dispatched"},
+        {"transport": "definitely_not_sent", "provider_dispatch": "not_dispatched",
+         "error": {"dispatched": False}},
+        {"transport": "may_have_been_sent", "provider_dispatch": "unknown"},
+        {"transport": "", "provider_dispatch": ""},
+        {"transport": "sent", "provider_dispatch": ""},
+    ],
+)
+def test_the_schema_still_accepts_valid_transport_and_provider_combinations(payload):
+    """The refusal invariant must not narrow the honest, non-refusal cases."""
+
+    allowed = dict(payload)
+    if allowed.get("provider_dispatch") == "not_dispatched":
+        allowed.update(job_id="j1", request_hash="h" * 64)
+    result = CommandResultIn(command_id="c1", **allowed)
+    assert result.command_id == "c1"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"transport": "may_have_been_sent", "provider_dispatch": "not_dispatched",
+         "job_id": "j1", "request_hash": "h" * 64, "error": {"dispatched": False}},
+        {"transport": "definitely_not_sent", "provider_dispatch": "dispatched"},
+        {"transport": "may_have_been_sent",
+         "error": {"code": "x", "message": "y", "dispatched": False}},
+    ],
+)
+def test_the_schema_still_rejects_contradictory_combinations(payload):
+    with pytest.raises(ValidationError):
+        CommandResultIn(command_id="c1", **payload)
 
 
 def test_the_schema_accepts_a_fully_correlated_refusal():

@@ -96,6 +96,17 @@ claimed (`_media_owner` untouched) and no retry is authorized.
 * `CommandResultIn` (the companion's HTTP report) gained `request_hash`, and now rejects
   `provider_dispatch == "not_dispatched"` unless `command_id`, `job_id` **and** `request_hash` are all
   present and the error carries an explicit boolean `dispatched: false`.
+
+  > **Corrected in Phase 3C.2.3.4.1.** This milestone wrote that check as
+  > `if self.error is not None and isinstance(self.error, dict): if error.get("dispatched") is not
+  > False: raise ...`, so a payload with valid-looking correlation fields and `error=None` skipped
+  > the explicit-refusal branch entirely and passed validation while claiming `not_dispatched`. The
+  > check is now unconditional: `provider_dispatch == "not_dispatched"` requires an error **object**
+  > whose `dispatched` field is explicitly the boolean `False`. `error=None`, a missing
+  > `dispatched`, `dispatched=True`, the string `"false"`, `0`, `None` and a non-object `error` are
+  > all rejected; a fully correlated refusal with `dispatched: false` is accepted. `extra="forbid"`
+  > and the transport/provider contradiction checks are unchanged, and nothing on the coordinator
+  > side (correlation, refusal classification, budget, retry, cancellation) was touched.
 * `QueuedCommand` carries `request_hash` to the companion (in memory, alongside the payload), and the
   companion echoes it. When a command arrives without one, the companion reports `not_dispatched` as
   `unknown` instead, because it cannot attribute the refusal to one attempt.
@@ -225,13 +236,14 @@ Both are reached from a single code path per attempt.
 
 ## 6. Tests
 
-`backend/tests/test_phase3c234_correlation_cleanup_cancel_race.py` — 58 tests:
+`backend/tests/test_phase3c234_correlation_cleanup_cancel_race.py` — 74 tests (58 from Phase
+3C.2.3.4, 16 added in Phase 3C.2.3.4.1 for the explicit-refusal invariant):
 
 | Area | Coverage |
 | --- | --- |
 | verdict | fully correlated answer accepted; each missing field names itself; wrong command id, job id, hash; a frame that is not a result envelope |
 | correlation | correlated refusal releases; every incomplete case (missing/wrong × command id, job id, hash) is `UNKNOWN` + settled + non-retryable; malformed error; contradictory transport/provider fields; uncorrelated success; foreign success; duplicate/late answer cannot move a settled job; envelope bound to another request refused; boolean-only evidence classifier |
-| schema | `not_dispatched` rejected without command id, job id or hash; rejected without the explicit boolean; accepted when fully correlated |
+| schema | `not_dispatched` rejected without command id, job id or hash; rejected without the explicit boolean; accepted when fully correlated; **Phase 3C.2.3.4.1** — `error=None`, missing `dispatched`, `dispatched=True`, `"false"`, `0`, `null` and a non-object error are each rejected, the honest non-refusal combinations still validate, and the contradiction rules still reject |
 | bridge dispatch | uncorrelated refusal → `flow_result_uncorrelated`/`UNKNOWN`; refusal for a job-less command refused; correlated refusal preserved; foreign hash rejected |
 | pending futures | success, timeout, cancellation, disconnect, malformed frame all retire the record; late result discarded; duplicate cannot satisfy another command; replacement future survives stale cleanup; duplicate and empty command ids refused; delivered-then-cancelled retires the abandoned record; `discard()` semantics |
 | cancel races | cancel wins before the send (no send, refunded); after the transport entry (ambiguous, settled, state kept, one attempt); waiting for the lock; while awaiting the result; during a retry; cancel-before-retry-sends refunds only the retry; repeated cancel of a terminal job; unknown job; a cancelled job can never be retried; bridge send cancelled mid-socket stays ambiguous with no pending record |
@@ -241,9 +253,11 @@ deterministic rather than timing-dependent.
 
 ## 7. Verification
 
-Recorded on this machine (UTC) at baseline `0fe77e4`, with no code change between the final
-acceptance run and the final suite run. Every line below is a **local** run; GitHub CI is a separate
-signal and is not claimed here.
+Recorded on this machine (UTC), with no code change between the final acceptance run and the final
+suite run. Every line below is a **local** run; GitHub CI is a separate signal and is not claimed
+here.
+
+### Phase 3C.2.3.4 (baseline `0fe77e4`, commit `07d2680`)
 
 | Check | Command | Result |
 | --- | --- | --- |
@@ -261,6 +275,21 @@ signal and is not claimed here.
 | Frontend types | `npx tsc --noEmit` | exit 0 |
 | Frontend build | `npm run build` | `index-B7cdMNiO.js` 402.08 kB (gzip 110.07 kB), `index-COHJWXOi.css` 33.24 kB |
 | Source audit | `../.venv/bin/python ../scripts/flow_source_audit.py` | `RESULT blocked (SOURCE_ABSENT)`, exit **3**, `2026-11-04T06:17:24Z` |
+
+### Phase 3C.2.3.4.1 (baseline `07d2680`, commit `Phase 3C.2.3.4.1: require explicit refusal evidence`)
+
+Re-run after the schema invariant was made unconditional. The table above describes the 3C.2.3.4
+run and is left as recorded; these are the numbers the correction produced.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| focused module | `../.venv/bin/python -m pytest tests/test_phase3c234_correlation_cleanup_cancel_race.py` | **74 passed** (58 + 16 new refusal-evidence tests) |
+| Backend suite | `../.venv/bin/python -m pytest tests` | **1153 passed in 512.98s**, 0 failed (06:32:58Z → 06:41:33Z) |
+| Acceptance | `../.venv/bin/python ../scripts/acceptance.py --base-url http://127.0.0.1:8000` | **65/65**, `generated_at 2026-11-04T06:50:53Z` |
+| Migration | `DATABASE_URL=sqlite+aiosqlite:////tmp/mig_3c2341.db` up → down → up | `c4d5e6f7a8b9 → d5e6f7a8b9c0`, head `d5e6f7a8b9c0` |
+| Frontend types | `npx tsc --noEmit` | exit 0 |
+| Frontend build | `npm run build` | `index-B7cdMNiO.js` 402.08 kB (gzip 110.07 kB), `index-COHJWXOi.css` 33.24 kB |
+| Source audit | `../.venv/bin/python ../scripts/flow_source_audit.py` | `RESULT blocked (SOURCE_ABSENT)`, exit **3**, `2026-11-04T06:52:06Z` |
 
 Fixture maintenance is recorded rather than hidden: the scripted transports in 3C.1, 3C.2
 compatibility, 3C.2.2, 3C.2.3.1, 3C.2.3.2 and 3C.2.3.3 now echo command id, job id and request hash

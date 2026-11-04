@@ -16,8 +16,29 @@ from app.tasks.celery_app import celery_app
 logger = get_logger("crusor.tasks.jobs")
 
 
+#: One event loop for the lifetime of the worker process.
+#:
+#: ``asyncio.run()`` builds a loop, runs one coroutine and closes the loop. The
+#: SQLAlchemy async engine is a module-level singleton with a real connection
+#: pool, so the second task inherits a pooled asyncpg/aiosqlite connection whose
+#: event loop has already been closed — the checkout's ``pool_pre_ping`` then
+#: fails with "attached to a different loop" / "Event loop is closed". On SQLite
+#: that is often invisible (aiosqlite tolerates it), which is why it only ever
+#: appeared on the production dialect. Keeping the loop alive is what makes the
+#: pool safe.
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _task_loop() -> asyncio.AbstractEventLoop:
+    global _loop
+    if _loop is None or _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+    return _loop
+
+
 def _run(coro_factory: Callable[[], Coroutine[Any, Any, Any]]) -> Any:
-    return asyncio.run(coro_factory())
+    return _task_loop().run_until_complete(coro_factory())
 
 
 async def _refresh_analytics(brand_profile_id: str | None = None, days: int = 30) -> dict[str, Any]:

@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --hq-accent: 139 92 246;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: #0a0a0b;
+    background-image:
+      radial-gradient(900px 500px at 15% -10%, rgba(139, 92, 246, 0.10), transparent 60%),
+      radial-gradient(700px 400px at 100% 0%, rgba(192, 192, 200, 0.05), transparent 55%);
+    background-repeat: no-repeat;
+    font-feature-settings: 'ss01' on, 'cv11' on;
+  }
+
+  ::selection {
+    background: rgba(139, 92, 246, 0.35);
+    color: #f4f4f5;
+  }
+
+  *:focus-visible {
+    outline: 2px solid rgba(167, 139, 250, 0.7);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Slim, dark scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a31 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #2a2a31;
+    border-radius: 999px;
+    border: 3px solid #0a0a0b;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer components {
+  .hq-panel {
+    @apply rounded-xl border border-white/[0.06] bg-ink-850/80 shadow-panel backdrop-blur-[2px];
+  }
+
+  .hq-panel-hover {
+    @apply transition-colors duration-150 hover:border-white/[0.12] hover:bg-ink-800/80;
+  }
+
+  .hq-label {
+    @apply text-[10px] font-medium uppercase tracking-brand text-steel-500;
+  }
+
+  .hq-mono {
+    @apply font-mono text-[11px] text-steel-500;
+  }
+
+  .hq-divider {
+    @apply h-px w-full bg-gradient-to-r from-transparent via-white/[0.08] to-transparent;
+  }
+
+  .hq-input {
+    @apply w-full rounded-lg border border-white/[0.08] bg-ink-900/80 px-3 py-2 text-sm
+      text-steel-300 placeholder:text-steel-600 transition-colors
+      hover:border-white/[0.14] focus:border-violet-500/60 focus:outline-none
+      focus:ring-1 focus:ring-violet-500/30 disabled:opacity-50;
+  }
+
+  .hq-select {
+    @apply hq-input appearance-none pr-8;
+  }
+
+  .hq-table {
+    @apply w-full border-collapse text-sm;
+  }
+  .hq-table th {
+    @apply border-b border-white/[0.07] px-4 py-2.5 text-left text-[10px] font-medium
+      uppercase tracking-brand text-steel-500;
+  }
+  .hq-table td {
+    @apply border-b border-white/[0.04] px-4 py-3 align-middle text-steel-300;
+  }
+  .hq-table tbody tr {
+    @apply transition-colors hover:bg-white/[0.02];
+  }
+
+  .hq-skeleton {
+    @apply animate-pulse rounded-md bg-white/[0.05];
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

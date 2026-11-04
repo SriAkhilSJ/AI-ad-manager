@@ -1,0 +1,8 @@
+{
+  "founder": "Founder name",
+  "granted_at": "2026-11-04T00:00:00Z",
+  "provider": "openai",
+  "max_spend_usd": 0.5,
+  "reference": "ticket or message id this authorisation came from",
+  "scope": "one image generation canary, no publishing"
+}

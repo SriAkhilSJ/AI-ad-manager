@@ -1,0 +1,9 @@
+.venv
+**/__pycache__
+**/*.pyc
+.git
+.data
+backend/tests/.tmp
+frontend/node_modules
+frontend/dist
+docs/acceptance-run.json

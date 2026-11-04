@@ -84,6 +84,7 @@ from app.flow.trust import (
     trust_status_payload,
 )
 from app.flow.delivery import (
+    DefiniteNonDelivery,
     DeliveryOutcome,
     DeliveryUncertain,
     DispatchFailed,
@@ -93,6 +94,7 @@ from app.flow.delivery import (
 )
 from app.flow.coordinator import (
     CoordinatorError,
+    correlate_result,
     FlowJob,
     GenerationCoordinator,
     LiveGenerationDisabled,
@@ -339,6 +341,10 @@ class BridgeTransport:
         self, command_id: str, timeout: float
     ) -> proto.ResultEnvelope:
         return await self.bridge.await_result(command_id, timeout)
+
+    def discard_result(self, command_id: str) -> bool:
+        """Retire a pending record nobody is going to await (Phase 3C.2.3.4)."""
+        return self.bridge.discard(command_id)
 
 
 class FlowBridge:
@@ -834,10 +840,7 @@ class FlowBridge:
                     await session.measurement_task
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
-            for future in session.pending.values():
-                if not future.done():
-                    future.set_exception(ConnectionError("extension disconnected"))
-            session.pending.clear()
+            self.retire_pending(session)
             if self.session is session:
                 self.session = None
             if acquired:
@@ -927,8 +930,16 @@ class FlowBridge:
                 continue
             if kind == "result":
                 envelope_id = str(payload.get("id") or "")
-                future = session.pending.pop(envelope_id, None)
-                if future is None or future.done():
+                # Phase 3C.2.3.4: the record is retired by identity, and only for the
+                # command it belongs to. A late or duplicate frame finds no entry (or
+                # a settled future) and is discarded; a malformed frame retires the
+                # future with a protocol error rather than leaving it dangling.
+                future = session.pending.get(envelope_id)
+                if future is None:
+                    continue
+                if session.pending.get(envelope_id) is future:
+                    session.pending.pop(envelope_id, None)
+                if future.done():
                     continue
                 try:
                     future.set_result(proto.ResultEnvelope.model_validate(payload))
@@ -937,6 +948,22 @@ class FlowBridge:
                 continue
             await session.websocket.close(code=4400, reason="unknown frame type")
             return
+
+    def retire_pending(self, session: ExtensionSession) -> int:
+        """Fail and drop every pending record when a socket goes away.
+
+        Phase 3C.2.3.4: this is the disconnect half of the pending-future lifecycle.
+        Every future that is still unresolved is completed with ``ConnectionError``
+        so a waiter wakes up instead of hanging, and the dictionary is cleared so no
+        record survives the session that owned it. Returns how many were retired.
+        """
+        retired = 0
+        for future in session.pending.values():
+            if not future.done():
+                future.set_exception(ConnectionError("extension disconnected"))
+            retired += 1
+        session.pending.clear()
+        return retired
 
     # --------------------------------------------------- installed artifact
     def _measurement_required(self) -> bool:
@@ -1281,7 +1308,12 @@ class FlowBridge:
         }
 
     async def dispatch(
-        self, command: str, payload: dict[str, Any], *, job_id: str = ""
+        self,
+        command: str,
+        payload: dict[str, Any],
+        *,
+        job_id: str = "",
+        request_hash: str = "",
     ) -> dict[str, Any]:
         """Send one allowlisted command and return its structured result.
 
@@ -1303,6 +1335,7 @@ class FlowBridge:
             payload=dict(payload),
             issued_at=proto.iso(),
             expires_at=proto.iso(),
+            request_hash=request_hash,
         )
 
         try:
@@ -1338,14 +1371,48 @@ class FlowBridge:
                 details={"reason": type(exc).__name__},
             ) from exc
 
+        # Phase 3C.2.3.4: nothing in this answer is trustworthy until it is bound to
+        # the exact command that was sent. An uncorrelated answer cannot establish a
+        # provider refusal (which would unlock a retry), so it is reported as a
+        # delivered-but-unknown attempt instead.
+        verdict = correlate_result(
+            result,
+            command_id=envelope.id,
+            job_id=envelope.job_id,
+            request_hash=envelope.request_hash,
+            require_job_id=bool(envelope.job_id),
+        )
+        if not verdict.ok:
+            raise DispatchFailed(
+                "The extension's answer could not be correlated to the command that "
+                f"was sent ({verdict.reason}).",
+                code="flow_result_uncorrelated",
+                delivery=DeliveryOutcome.SENT,
+                provider=ProviderDispatchOutcome.UNKNOWN,
+                details={"field": verdict.field, "reason": verdict.reason},
+            )
+
         if not result.ok:
             descriptor = proto.normalise_error(result.error)
             raw_error = result.error if isinstance(result.error, dict) else {}
+            provider = classify_provider_dispatch(raw_error.get("dispatched"))
+            if provider is ProviderDispatchOutcome.NOT_DISPATCHED and not envelope.job_id:
+                # A refusal is only attributable to one attempt when the command
+                # carried a job id; without it the claim cannot be correlated.
+                raise DispatchFailed(
+                    "The extension said no generation was submitted, but the command "
+                    "carried no job id, so the claim cannot be attributed to one "
+                    "attempt.",
+                    code="flow_result_uncorrelated",
+                    delivery=DeliveryOutcome.SENT,
+                    provider=ProviderDispatchOutcome.UNKNOWN,
+                    details={"field": "job_id", "reason": "the command carried no job id"},
+                )
             raise DispatchFailed(
                 descriptor.message,
                 code=descriptor.code.value,
                 delivery=DeliveryOutcome.SENT,
-                provider=classify_provider_dispatch(raw_error.get("dispatched")),
+                provider=provider,
                 details=dict(descriptor.details),
             )
         return dict(result.result)
@@ -1366,6 +1433,18 @@ class FlowBridge:
         session = self.session
         if session is None or not session.authenticated:
             raise NotPaired()
+        if not envelope.id:
+            raise DefiniteNonDelivery(
+                "The command had no id, so no answer could ever be correlated to it."
+            )
+        if envelope.id in session.pending:
+            # Command ids are never reused. Registering a second future under a live
+            # id would let one answer complete the wrong command, so this is refused
+            # before anything reaches the socket.
+            raise DefiniteNonDelivery(
+                "A command with this id is already awaiting an answer; ids are never "
+                "reused."
+            )
         frame = envelope.model_dump_json()
         loop = asyncio.get_running_loop()
         future = loop.create_future()
@@ -1397,14 +1476,51 @@ class FlowBridge:
             ) from exc
         return DeliveryOutcome.SENT
 
+    def discard(self, command_id: str) -> bool:
+        """Forget one pending command without waiting for its answer.
+
+        The coordinator calls this when a cancellation won the state transition while
+        a send was in flight: the frame went out, the command will never be awaited,
+        and the record must not outlive the attempt. The entry is removed by identity
+        (so a replacement under the same key is untouched) and its future cancelled.
+        """
+        session = self.session
+        if session is None:
+            return False
+        future = session.pending.get(command_id)
+        if future is None:
+            return False
+        if session.pending.get(command_id) is future:
+            session.pending.pop(command_id, None)
+        if not future.done():
+            future.cancel()
+        return True
+
     async def await_result(self, command_id: str, timeout: float) -> proto.ResultEnvelope:
+        """Wait for one answer and always retire the pending record.
+
+        Phase 3C.2.3.4: ``asyncio.wait_for`` cancels the future on timeout but leaves
+        the ``pending`` entry behind, so every timeout, cancellation, disconnect or
+        decode failure used to leak a slot in ``session.pending`` until the socket
+        closed. The entry is now removed in ``finally``, exactly once, and only if it
+        is still *our* future — a replacement registered under the same key (which
+        the caller must never do, and ``send_command`` refuses) is left alone. A
+        cancelled future cannot be completed by a late frame, so a late result can
+        neither satisfy this command nor any other.
+        """
         session = self.session
         if session is None:
             raise ConnectionError("extension disconnected")
         future = session.pending.get(command_id)
         if future is None:
             raise ConnectionError("command was not sent")
-        return await asyncio.wait_for(future, timeout=timeout)
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            if session.pending.get(command_id) is future:
+                session.pending.pop(command_id, None)
+            if not future.done():
+                future.cancel()
 
     async def submit_generation(
         self, kind: str, request: proto.GenerationCommand, *, approval_binding: str

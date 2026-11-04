@@ -252,6 +252,16 @@ class LocalFlowCompanion:
         name = str(command.get("command") or "")
         payload = dict(command.get("payload") or {})
         job_id = str(command.get("job_id") or "")
+        # Phase 3C.2.3.4: echoed back with the result so the backend can correlate it.
+        request_hash = str(command.get("request_hash") or "")
+        # A local refusal is real, but `not_dispatched` is *evidence*: without the
+        # command's request hash it cannot be tied to one attempt, so it is reported
+        # as unknown and can never authorize a retry.
+        refusal_provider = (
+            ProviderDispatchOutcome.NOT_DISPATCHED
+            if request_hash
+            else ProviderDispatchOutcome.UNKNOWN
+        )
 
         try:
             proto.ensure_allowed(name)
@@ -266,10 +276,11 @@ class LocalFlowCompanion:
                     "message": exc.message,
                     "dispatched": False,
                     "transport": DeliveryOutcome.DEFINITELY_NOT_SENT.value,
-                    "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
+                    "provider_dispatch": refusal_provider.value,
                 },
                 transport=DeliveryOutcome.DEFINITELY_NOT_SENT,
-                provider=ProviderDispatchOutcome.NOT_DISPATCHED,
+                provider=refusal_provider,
+                request_hash=request_hash,
             )
             return
 
@@ -287,10 +298,11 @@ class LocalFlowCompanion:
                     # Explicit, and true here: the command never reached the socket.
                     "dispatched": False,
                     "transport": DeliveryOutcome.DEFINITELY_NOT_SENT.value,
-                    "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
+                    "provider_dispatch": refusal_provider.value,
                 },
                 transport=DeliveryOutcome.DEFINITELY_NOT_SENT,
-                provider=ProviderDispatchOutcome.NOT_DISPATCHED,
+                provider=refusal_provider,
+                request_hash=request_hash,
             )
             return
 
@@ -304,16 +316,19 @@ class LocalFlowCompanion:
                     "message": "The local bridge is not running.",
                     "dispatched": False,
                     "transport": DeliveryOutcome.DEFINITELY_NOT_SENT.value,
-                    "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
+                    "provider_dispatch": refusal_provider.value,
                 },
                 transport=DeliveryOutcome.DEFINITELY_NOT_SENT,
-                provider=ProviderDispatchOutcome.NOT_DISPATCHED,
+                provider=refusal_provider,
+                request_hash=request_hash,
             )
             return
 
         self.status.paired = self.bridge.paired
         try:
-            result = await self.bridge.dispatch(name, payload, job_id=job_id)
+            result = await self.bridge.dispatch(
+                name, payload, job_id=job_id, request_hash=request_hash
+            )
         except asyncio.CancelledError:
             # No result is posted: the request is being torn down. Silence is honest
             # here — the backend treats the job as unknown, never as non-delivery.
@@ -327,10 +342,14 @@ class LocalFlowCompanion:
             delivery = classify_send_exception(exc)
             if isinstance(exc, DispatchFailed):
                 # The bridge correlated this answer with the command it sent, so the
-                # pair it reports is evidence, not speculation.
+                # pair it reports is evidence, not speculation — except that a
+                # `not_dispatched` claim still needs the request hash to be
+                # attributable to one attempt.
                 provider = exc.provider
+                if provider is ProviderDispatchOutcome.NOT_DISPATCHED and not request_hash:
+                    provider = ProviderDispatchOutcome.UNKNOWN
             elif delivery is DeliveryOutcome.DEFINITELY_NOT_SENT:
-                provider = ProviderDispatchOutcome.NOT_DISPATCHED
+                provider = refusal_provider
             else:
                 provider = ProviderDispatchOutcome.UNKNOWN
             error: dict[str, Any] = {
@@ -348,12 +367,15 @@ class LocalFlowCompanion:
                 error=error,
                 transport=delivery,
                 provider=provider,
+                request_hash=request_hash,
             )
             self.status.commands_refused += 1
             return
 
         self.status.commands_handled += 1
-        await self._post_result(command_id, ok=True, job_id=job_id, result=result)
+        await self._post_result(
+            command_id, ok=True, job_id=job_id, result=result, request_hash=request_hash
+        )
 
     async def _post_result(
         self,
@@ -365,6 +387,7 @@ class LocalFlowCompanion:
         error: dict[str, Any] | None = None,
         transport: DeliveryOutcome | None = None,
         provider: ProviderDispatchOutcome | None = None,
+        request_hash: str = "",
     ) -> None:
         payload: dict[str, Any] = {
             "command_id": command_id,
@@ -373,6 +396,11 @@ class LocalFlowCompanion:
             "result": result or {},
             "error": error,
         }
+        # Phase 3C.2.3.4: the echo of the request hash the backend issued with the
+        # command. It is what ties this report to one attempt; a report that cannot
+        # carry it may not claim `not_dispatched`.
+        if request_hash:
+            payload["request_hash"] = request_hash
         # Phase 3C.2.3.3: the two events travel separately. Omitted means "not
         # stated", which the backend records as unknown — never as non-delivery.
         if transport is not None:

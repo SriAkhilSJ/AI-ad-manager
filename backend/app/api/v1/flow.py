@@ -236,6 +236,7 @@ async def companion_result(
             # "not dispatched" and must never be read that way.
             "transport": payload.transport,
             "provider_dispatch": payload.provider_dispatch,
+            "request_hash": payload.request_hash,
         },
     )
     await session.commit()

@@ -106,6 +106,10 @@ class CommandResultIn(BaseModel):
     transport: Literal["", "definitely_not_sent", "may_have_been_sent", "sent"] = ""
     #: extension → provider dispatch. ``unknown`` is the safe default when unstated.
     provider_dispatch: Literal["", "not_dispatched", "dispatched", "unknown"] = ""
+    #: Phase 3C.2.3.4: the echo of the request hash the backend issued with the
+    #: command. Required evidence for any ``not_dispatched`` claim, and compared by
+    #: the coordinator before a refusal can release a reservation.
+    request_hash: str = Field(default="", max_length=64)
 
     @model_validator(mode="after")
     def _states_do_not_contradict(self) -> "CommandResultIn":
@@ -129,6 +133,30 @@ class CommandResultIn(BaseModel):
                 "A result may not claim 'dispatched: false' while its transport "
                 "delivery is 'may_have_been_sent'."
             )
+        # Phase 3C.2.3.4: a refusal is evidence only when it can be tied to one
+        # attempt. The command id, the job id and the request hash all have to be
+        # present; the backend will not accept a bare 'not_dispatched'.
+        if self.provider_dispatch == "not_dispatched":
+            missing = [
+                name
+                for name, value in (
+                    ("command_id", self.command_id),
+                    ("job_id", self.job_id),
+                    ("request_hash", self.request_hash),
+                )
+                if not str(value or "").strip()
+            ]
+            if missing:
+                raise ValueError(
+                    "provider_dispatch 'not_dispatched' requires a correlated result; "
+                    f"missing: {', '.join(missing)}."
+                )
+            if self.error is not None and isinstance(self.error, dict):
+                if error.get("dispatched") is not False:
+                    raise ValueError(
+                        "provider_dispatch 'not_dispatched' requires an explicit "
+                        "boolean error.dispatched == false."
+                    )
         return self
 
 

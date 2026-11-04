@@ -198,6 +198,141 @@ def media_fingerprint(job_id: str, media_id: str, prompt_hash: str) -> str:
     return hashlib.sha256(f"{job_id}|{media_id}|{prompt_hash}".encode("utf-8")).hexdigest()
 
 
+@dataclass(frozen=True)
+class CorrelationVerdict:
+    """Whether one result frame is bound to the exact command that awaits it."""
+
+    ok: bool
+    reason: str = ""
+    field: str = ""
+
+    def as_details(self) -> dict[str, Any]:
+        if self.ok:
+            return {}
+        return {"correlation": "rejected", "field": self.field, "reason": self.reason}
+
+
+def correlate_result(
+    result: ResultEnvelope,
+    *,
+    command_id: str,
+    job_id: str,
+    request_hash: str = "",
+    require_job_id: bool = True,
+) -> CorrelationVerdict:
+    """Require every correlation field to be present **and** equal.
+
+    Phase 3C.2.3.4. Phase 3C.2.3.3 treated correlation as a mismatch check —
+    ``if result.job_id and result.job_id != job.job_id`` — so a result that simply
+    *omitted* the job id (or the request hash, which did not exist yet) was still
+    treated as correlated. That was enough to record ``NOT_DISPATCHED`` and release a
+    reservation, i.e. to authorize a retry of an attempt that may already have been
+    billable. Absence is now a rejection, not a wildcard:
+
+    * the command id must be present and equal to the id of the frame that was sent;
+    * the job id must be present and equal to the job awaiting it;
+    * when the command carried a request hash, the answer must echo it exactly;
+    * the frame must be a ``result`` envelope with the expected shape (enforced by
+      :class:`~app.flow.protocol.ResultEnvelope` before this runs).
+
+    The caller decides what a rejection means. For a submission it is always
+    ``UNKNOWN_SUBMISSION``: the frame was delivered, so the spend stays and no
+    automatic retry is authorized.
+    """
+
+    if getattr(result, "type", "result") != "result":
+        return CorrelationVerdict(False, "the frame was not a result envelope", "type")
+    if not command_id:
+        return CorrelationVerdict(
+            False, "no command id was recorded for this attempt", "command_id"
+        )
+    if not result.id:
+        return CorrelationVerdict(False, "the answer carried no command id", "command_id")
+    if result.id != command_id:
+        return CorrelationVerdict(
+            False, "the answer did not echo the command id", "command_id"
+        )
+    if require_job_id:
+        if not job_id:
+            return CorrelationVerdict(False, "the command carried no job id", "job_id")
+        if not result.job_id:
+            return CorrelationVerdict(False, "the answer carried no job id", "job_id")
+        if result.job_id != job_id:
+            return CorrelationVerdict(
+                False, "the answer carried a different job id", "job_id"
+            )
+    elif job_id and result.job_id and result.job_id != job_id:
+        return CorrelationVerdict(
+            False, "the answer carried a different job id", "job_id"
+        )
+    if request_hash:
+        if not result.request_hash:
+            return CorrelationVerdict(
+                False, "the answer carried no request hash", "request_hash"
+            )
+        if result.request_hash != request_hash:
+            return CorrelationVerdict(
+                False, "the answer carried a different request hash", "request_hash"
+            )
+    return CorrelationVerdict(True)
+
+
+def classify_error_evidence(
+    raw_error: dict[str, Any], job: FlowJob
+) -> tuple[ProviderDispatchOutcome, str]:
+    """Read the provider state a *delivered* error answer can establish.
+
+    Returns ``(outcome, reason)``. ``NOT_DISPATCHED`` requires the explicit Python
+    boolean ``False`` and the absence of any contradiction:
+
+    * ``transport`` must be absent or say ``sent`` — the frame *was* delivered, so an
+      answer that claims otherwise is describing a different attempt;
+    * ``provider_dispatch`` must be absent or agree;
+    * an embedded ``request_hash`` must match when present.
+
+    Everything else — a missing flag, a string, a number, ``None`` — is ``UNKNOWN``.
+    Phase 3C.2.3.4: absent evidence is not evidence, so this can no longer authorize
+    a retry on its own.
+    """
+
+    evidence = raw_error.get("dispatched")
+    declared_transport = raw_error.get("transport")
+    declared_provider = raw_error.get("provider_dispatch")
+    bound_hash = raw_error.get("request_hash")
+
+    if bound_hash not in (None, "") and bound_hash != job.request_hash:
+        return ProviderDispatchOutcome.UNKNOWN, "the error carried a different request hash"
+    if declared_transport not in (None, "", "sent"):
+        return (
+            ProviderDispatchOutcome.UNKNOWN,
+            f"the error claimed transport {declared_transport!r} for a delivered frame",
+        )
+
+    if evidence is True:
+        if declared_provider not in (None, "", "dispatched"):
+            return (
+                ProviderDispatchOutcome.UNKNOWN,
+                f"the error contradicted itself (dispatched: true, {declared_provider!r})",
+            )
+        return ProviderDispatchOutcome.DISPATCHED, ""
+    if evidence is False:
+        if declared_provider not in (None, "", "not_dispatched"):
+            return (
+                ProviderDispatchOutcome.UNKNOWN,
+                f"the error contradicted itself (dispatched: false, {declared_provider!r})",
+            )
+        return ProviderDispatchOutcome.NOT_DISPATCHED, ""
+    if evidence is None:
+        return (
+            ProviderDispatchOutcome.UNKNOWN,
+            "the answer did not state whether a generation was submitted",
+        )
+    return (
+        ProviderDispatchOutcome.UNKNOWN,
+        "the answer's dispatched flag was not a boolean",
+    )
+
+
 @dataclass
 class FlowJob:
     job_id: str
@@ -217,6 +352,11 @@ class FlowJob:
     #: Phase 3C.2.3.3: extension → provider dispatch. Independent of :attr:`delivery`;
     #: ``UNKNOWN`` unless a correlated response established something.
     provider_dispatch: ProviderDispatchOutcome = ProviderDispatchOutcome.UNKNOWN
+    #: Phase 3C.2.3.4: set under the coordinator lock when this attempt is about to
+    #: enter the transport. It is the boundary ``cancel()`` needs: before it, a
+    #: cancel can prove no send started and is a clean ``CANCELLED``; after it, a
+    #: cancel can no longer promise that and must answer ``UNKNOWN_SUBMISSION``.
+    send_started: bool = False
     attempts: int = 0
     media_id: str = ""
     media_fingerprint: str = ""
@@ -248,6 +388,7 @@ class FlowJob:
             "dispatched": self.dispatched,
             "delivery": self.delivery.value if self.delivery is not None else None,
             "provider_dispatch": self.provider_dispatch.value,
+            "send_started": self.send_started,
             "attempts": self.attempts,
             "prompt_hash": self.request.prompt_hash(),
             "request_hash": self.request_hash,
@@ -489,14 +630,18 @@ class GenerationCoordinator:
         except asyncio.CancelledError:
             # Cancelled while waiting: the frame is out, the answer is not. Record it
             # as an unknown submission (settled, never retryable) and re-raise.
-            self._mark_unknown(job, "cancelled while waiting for the extension's answer")
+            await self._mark_unknown(
+                job, "cancelled while waiting for the extension's answer"
+            )
             raise
         except asyncio.TimeoutError:
-            return self._mark_unknown(job, "the extension did not answer after dispatch")
+            return await self._mark_unknown(job, "the extension did not answer after dispatch")
         except Exception as exc:  # noqa: BLE001 - dropped socket, decode error, ...
-            return self._mark_unknown(job, f"transport failed after dispatch ({type(exc).__name__})")
+            return await self._mark_unknown(
+                job, f"transport failed after dispatch ({type(exc).__name__})"
+            )
 
-        return self._apply_submission_result(job, result, command_id=envelope.id)
+        return await self._apply_submission_result(job, result, envelope=envelope)
 
     async def _deliver(self, job: FlowJob, envelope: CommandEnvelope) -> FlowJob | None:
         """Send one attempt and classify delivery independently of provider dispatch.
@@ -516,7 +661,33 @@ class GenerationCoordinator:
           ``CancelledError`` is re-raised, so cancellation is never swallowed.
         * **sent** — the reservation stays tracked until the result arrives; the
           provider state stays ``UNKNOWN`` until a correlated answer says otherwise.
+
+        Phase 3C.2.3.4: the transition into the transport happens under the same lock
+        ``cancel()`` takes. If a cancellation has already terminated the job, this
+        method returns it **without writing to the socket**; if the cancel lands
+        after the transition, the send may still complete and the cancel is answered
+        as ambiguity. There is no window in which a cancel overwrites a live send's
+        state or a send overwrites a cancel's.
         """
+        if envelope.job_id != job.job_id or envelope.request_hash != job.request_hash:
+            # The frame must be bound to this job before it can be sent, otherwise
+            # no answer to it could ever be correlated.
+            raise CoordinatorError(
+                "The command envelope is not bound to this job.",
+                details={
+                    "job_id": job.job_id,
+                    "envelope_job_id": envelope.job_id,
+                    "request_hash_bound": bool(envelope.request_hash),
+                },
+            )
+        async with self._lock:
+            if job.state is not SubmissionState.PENDING or job.send_started:
+                # A cancellation (or another transition) won while this attempt was
+                # being built: nothing may reach the socket.
+                return job
+            job.send_started = True
+            job.updated_at = self.clock()
+
         try:
             raw = await self.transport.send(envelope)
         except asyncio.CancelledError:
@@ -529,64 +700,97 @@ class GenerationCoordinator:
                 and declared is DeliveryOutcome.DEFINITELY_NOT_SENT
                 else DeliveryOutcome.MAY_HAVE_BEEN_SENT
             )
-            self._record_delivery_failure(
-                job,
-                outcome,
-                reason="cancelled during send",
-                detail="CancelledError",
-                released=(outcome is DeliveryOutcome.DEFINITELY_NOT_SENT),
+            await self._record_delivery_failure(
+                job, outcome, reason="cancelled during send", detail="CancelledError"
             )
             raise
         except Exception as exc:  # noqa: BLE001 - classification decides, not the type
             outcome = classify_send_exception(exc)
-            released = outcome is DeliveryOutcome.DEFINITELY_NOT_SENT
-            self._record_delivery_failure(
-                job,
-                outcome,
-                reason=type(exc).__name__,
-                detail=type(exc).__name__,
-                released=released,
+            return await self._record_delivery_failure(
+                job, outcome, reason=type(exc).__name__, detail=type(exc).__name__
             )
-            return job
 
         outcome = classify_send_result(raw)
         if outcome is not DeliveryOutcome.SENT:
-            self._record_delivery_failure(
+            return await self._record_delivery_failure(
                 job,
                 outcome,
                 reason="the transport reported its own outcome",
                 detail="transport_result",
-                released=outcome is DeliveryOutcome.DEFINITELY_NOT_SENT,
             )
-            return job
+        return await self._record_send_success(job, envelope.id)
 
-        job.delivery = DeliveryOutcome.SENT
-        job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
-        job.dispatched = True
-        job.state = SubmissionState.DISPATCHED
-        job.updated_at = self.clock()
-        return None
+    async def _record_send_success(self, job: FlowJob, command_id: str) -> FlowJob | None:
+        """Record a completed send. Returns ``None`` when the caller may wait.
 
-    def _record_delivery_failure(
+        A cancel that won during the send has already answered the attempt as
+        ``UNKNOWN_SUBMISSION``; the delivery is upgraded to ``SENT`` (that is the
+        truth) but the terminal state and the settled reservation stay put, and the
+        caller does not wait for an answer nobody is tracking.
+        """
+        async with self._lock:
+            cancelled = job.state is not SubmissionState.PENDING
+            job.delivery = DeliveryOutcome.SENT
+            job.dispatched = True
+            job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
+            job.updated_at = self.clock()
+            if not cancelled:
+                job.state = SubmissionState.DISPATCHED
+                return None
+        # A cancellation owns this attempt, so nobody will await the answer. Retire
+        # the transport's record for the command: the frame is out, its reply is not
+        # wanted, and the record must not outlive the attempt it describes.
+        self._discard_pending(command_id)
+        return job
+
+    def _discard_pending(self, command_id: str) -> None:
+        """Ask a transport to forget a command nobody will await.
+
+        Optional on purpose: the protocol stays the two methods it always was, and a
+        synthetic transport without the hook is still valid. The bridge implements it
+        so a cancelled-but-delivered attempt leaves no pending record behind.
+        """
+        discard = getattr(self.transport, "discard_result", None)
+        if callable(discard):
+            discard(command_id)
+
+    async def _record_delivery_failure(
         self,
         job: FlowJob,
         outcome: DeliveryOutcome,
         *,
         reason: str,
         detail: str,
-        released: bool,
     ) -> FlowJob:
         """Record a failed send without letting it speak for the provider.
 
         A failed *transport* send is the only thing this method may classify: the
         provider is ``NOT_DISPATCHED`` only when the frame provably never left, and
-        ``UNKNOWN`` otherwise.
+        ``UNKNOWN`` otherwise. Phase 3C.2.3.4: the decision is taken under the lock,
+        and a cancellation that already terminated this attempt keeps its own state —
+        the delivery is recorded truthfully but the reservation is neither settled a
+        second time nor refunded after the fact.
         """
-        job.delivery = outcome
-        if released:
+        async with self._lock:
+            cancelled = job.state is not SubmissionState.PENDING
+            job.delivery = outcome
+            if outcome is DeliveryOutcome.DEFINITELY_NOT_SENT:
+                job.dispatched = False
+                job.provider_dispatch = ProviderDispatchOutcome.NOT_DISPATCHED
+            else:
+                job.dispatched = True
+                job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
+            job.updated_at = self.clock()
+            if cancelled:
+                return job
+            return self._apply_failed_send(job, outcome, reason=reason, detail=detail)
+
+    def _apply_failed_send(
+        self, job: FlowJob, outcome: DeliveryOutcome, *, reason: str, detail: str
+    ) -> FlowJob:
+        """Transitions for a failed send that no cancellation has claimed."""
+        if outcome is DeliveryOutcome.DEFINITELY_NOT_SENT:
             self._release_reservation(job.job_id)
-            job.provider_dispatch = ProviderDispatchOutcome.NOT_DISPATCHED
-            job.dispatched = False
             job.state = SubmissionState.FAILED
             job.error = ErrorDescriptor(
                 FlowErrorCode.EXTENSION_DISCONNECTED,
@@ -597,8 +801,6 @@ class GenerationCoordinator:
             )
         else:
             self._settle_reservation(job.job_id)
-            job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
-            job.dispatched = True
             job.state = SubmissionState.UNKNOWN_SUBMISSION
             job.error = ErrorDescriptor(
                 FlowErrorCode.UNKNOWN_SUBMISSION,
@@ -611,33 +813,49 @@ class GenerationCoordinator:
         job.updated_at = self.clock()
         return job
 
-    def _apply_submission_result(
-        self, job: FlowJob, result: ResultEnvelope, *, command_id: str = ""
+    async def _apply_submission_result(
+        self, job: FlowJob, result: ResultEnvelope, *, envelope: CommandEnvelope
     ) -> FlowJob:
-        """Apply a correlated extension answer, classifying provider dispatch.
+        """Apply an answer under the lock, and only if it is bound to this command."""
+        async with self._lock:
+            return self._apply_result_locked(job, result, envelope=envelope)
 
-        Phase 3C.2.3.3. The transport result is already ``SENT`` by the time this
+    def _apply_result_locked(
+        self, job: FlowJob, result: ResultEnvelope, *, envelope: CommandEnvelope
+    ) -> FlowJob:
+        """Classify provider dispatch from an answer that passed correlation.
+
+        Phase 3C.2.3.4. The transport result is already ``SENT`` by the time this
         runs — the extension answered — and nothing here may rewrite that. What the
         answer can establish is the *provider* state:
 
-        * ``ok`` with a correlated answer → ``DISPATCHED`` (a submit succeeded);
-        * an explicit boolean ``dispatched: false`` in a correlated, well-formed error
-          → ``NOT_DISPATCHED``; the attempt is retryable and the reservation is
+        * ``ok`` with a fully correlated answer → ``DISPATCHED`` (a submit succeeded);
+        * an explicit boolean ``dispatched: false`` in a fully correlated, well-formed
+          error → ``NOT_DISPATCHED``; the attempt is retryable and the reservation is
           released, because the provider was told nothing;
-        * an explicit ``dispatched: true`` → ``DISPATCHED`` with an unknown outcome;
-        * anything else (missing field, non-boolean, uncorrelated id, contradictory
-          request hash, malformed error) → ``UNKNOWN`` and never retryable.
+        * an explicit ``dispatched: true`` → ``DISPATCHED`` while the *outcome* stays
+          unknown;
+        * anything else (missing command id, missing job id, missing request hash, a
+          mismatched value, a non-boolean flag, a contradictory transport or provider
+          field, a malformed error) → ``UNKNOWN``, the reservation is settled and no
+          automatic retry is authorized.
+
+        A job that is no longer ``DISPATCHED`` — cancelled, timed out, or already
+        answered — cannot be moved by any result, including a duplicate or a late one.
         """
-        if command_id and result.id and result.id != command_id:
-            return self._mark_unknown(
-                job, "the answer did not echo the command id", foreign=result.id
-            )
-        if result.job_id and result.job_id != job.job_id:
-            return self._mark_unknown(
-                job, "the extension answered with a different job id", foreign=result.job_id
-            )
+        if job.state is not SubmissionState.DISPATCHED:
+            return job
+        verdict = correlate_result(
+            result,
+            command_id=envelope.id,
+            job_id=job.job_id,
+            request_hash=envelope.request_hash,
+        )
+        if not verdict.ok:
+            return self._mark_unknown_locked(job, verdict.reason, correlation=verdict)
 
         job.delivery = DeliveryOutcome.SENT
+        job.dispatched = True
 
         if result.ok:
             self._settle_reservation(job.job_id)
@@ -646,7 +864,7 @@ class GenerationCoordinator:
             media_id = str(result.result.get("media_id") or "")
             if media_id:
                 if not _MEDIA_ID_PATTERN.match(media_id):
-                    return self._mark_unknown(job, "the media id was malformed")
+                    return self._mark_unknown_locked(job, "the media id was malformed")
                 self._claim_media(job, media_id)
             job.state = SubmissionState.SUBMITTED
             job.updated_at = self.clock()
@@ -654,23 +872,13 @@ class GenerationCoordinator:
 
         raw_error = result.error if isinstance(result.error, dict) else {}
         descriptor = normalise_error(raw_error)
-        evidence = raw_error.get("dispatched")
-        bound_hash = raw_error.get("request_hash")
-        contradictory_hash = (
-            isinstance(bound_hash, str) and bool(bound_hash) and bound_hash != job.request_hash
-        )
-        provider = (
-            ProviderDispatchOutcome.UNKNOWN
-            if contradictory_hash
-            else classify_provider_dispatch(evidence)
-        )
+        provider, refusal = classify_error_evidence(raw_error, job)
 
         if provider is ProviderDispatchOutcome.NOT_DISPATCHED:
             # The provider was told nothing — but the frame *was* delivered, so the
             # transport history stays SENT and ``dispatched`` stays True.
             self._release_reservation(job.job_id)
             job.provider_dispatch = ProviderDispatchOutcome.NOT_DISPATCHED
-            job.dispatched = True
             job.state = SubmissionState.FAILED
             job.error = ErrorDescriptor(
                 descriptor.code,
@@ -680,6 +888,7 @@ class GenerationCoordinator:
                     **descriptor.details,
                     "delivery": DeliveryOutcome.SENT.value,
                     "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
+                    "correlated": True,
                 },
             )
             job.updated_at = self.clock()
@@ -687,7 +896,6 @@ class GenerationCoordinator:
 
         self._settle_reservation(job.job_id)
         job.provider_dispatch = provider
-        job.dispatched = True
         job.state = SubmissionState.UNKNOWN_SUBMISSION
         job.error = ErrorDescriptor(
             FlowErrorCode.UNKNOWN_SUBMISSION,
@@ -698,15 +906,40 @@ class GenerationCoordinator:
                 "upstream_code": descriptor.details.get("upstream_code", ""),
                 "delivery": DeliveryOutcome.SENT.value,
                 "provider_dispatch": provider.value,
-                "contradictory_request_hash": contradictory_hash,
+                "evidence": refusal or "the answer did not establish a provider state",
             },
         )
         job.updated_at = self.clock()
         return job
 
-    def _mark_unknown(
-        self, job: FlowJob, reason: str, *, foreign: str = ""
+    async def _mark_unknown(
+        self,
+        job: FlowJob,
+        reason: str,
+        *,
+        foreign: str = "",
+        correlation: CorrelationVerdict | None = None,
     ) -> FlowJob:
+        async with self._lock:
+            return self._mark_unknown_locked(
+                job, reason, foreign=foreign, correlation=correlation
+            )
+
+    def _mark_unknown_locked(
+        self,
+        job: FlowJob,
+        reason: str,
+        *,
+        foreign: str = "",
+        correlation: CorrelationVerdict | None = None,
+    ) -> FlowJob:
+        """Settle the attempt as spend and record that its outcome is unknown.
+
+        A cancellation that already terminated this attempt owns the final state; a
+        later timeout or stray answer does not get to rewrite it.
+        """
+        if job.state is SubmissionState.CANCELLED:
+            return job
         # The attempt was dispatched and its outcome is unknown: the reservation
         # becomes spend and is never refunded.
         self._settle_reservation(job.job_id)
@@ -718,6 +951,7 @@ class GenerationCoordinator:
             "It will not be resubmitted automatically.",
             retryable=False,
             details={
+                **(correlation.as_details() if correlation is not None else {}),
                 **({"foreign_job_id": foreign} if foreign else {}),
                 "reason": reason,
                 "delivery": (job.delivery.value if job.delivery else "unknown"),
@@ -771,8 +1005,20 @@ class GenerationCoordinator:
         except Exception:  # noqa: BLE001
             return job
 
-        if result.job_id and result.job_id != job.job_id:
-            raise ForeignResult("status answer carried a different job id", job_id=job.job_id)
+        # Phase 3C.2.3.4: a status answer may not move a job unless it is bound to
+        # the command that asked the question. A status command carries no request
+        # hash, so correlation is the command id plus the job id.
+        verdict = correlate_result(
+            result,
+            command_id=envelope.id,
+            job_id=job.job_id,
+            request_hash=envelope.request_hash,
+        )
+        if not verdict.ok:
+            raise ForeignResult(
+                f"The status answer was not correlated to this job ({verdict.reason}).",
+                job_id=job.job_id,
+            )
 
         if result.ok:
             payload = dict(result.result)
@@ -899,6 +1145,10 @@ class GenerationCoordinator:
                 job.delivery = None
                 job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
                 job.dispatched = False
+                # A new attempt has its own entry into the transport; carrying the
+                # previous attempt's flag would make `_deliver` refuse to send and
+                # `cancel()` treat a not-yet-sent retry as ambiguous.
+                job.send_started = False
                 if estimate:
                     self._reservations[job.job_id] = estimate
                 job.updated_at = self.clock()
@@ -932,64 +1182,89 @@ class GenerationCoordinator:
         try:
             result = await self.transport.await_result(envelope.id, self.command_timeout)
         except asyncio.CancelledError:
-            self._mark_unknown(job, "cancelled while waiting for the retry's answer")
+            await self._mark_unknown(job, "cancelled while waiting for the retry's answer")
             raise
         except asyncio.TimeoutError:
-            return self._mark_unknown(job, "no answer after retry dispatch")
+            return await self._mark_unknown(job, "no answer after retry dispatch")
         except Exception as exc:  # noqa: BLE001
-            return self._mark_unknown(job, f"transport failed after retry ({type(exc).__name__})")
-        return self._apply_submission_result(job, result, command_id=envelope.id)
+            return await self._mark_unknown(
+                job, f"transport failed after retry ({type(exc).__name__})"
+            )
+        return await self._apply_submission_result(job, result, envelope=envelope)
 
     # ---------------------------------------------------------------- cancel
     async def cancel(self, job_id: str) -> FlowJob:
-        """Stop tracking a job without ever implying the provider did not start it.
+        """Stop tracking a job without ever claiming it was not submitted.
 
-        * ``NOT_SUBMITTED`` — nothing was dispatched, so ``CANCELLED`` is a fact.
-        * ``SUBMITTING`` — the frame left the socket; raising
-          :class:`CancellationAmbiguous` after marking it ``UNKNOWN_SUBMISSION`` is
-          the only honest answer, because a local cancel cannot recall a submit.
-        * ``SUBMITTED``/``RUNNING`` — Google has the job. It is marked ``CANCELLED``
-          for Crusor's purposes with an explicit note that the provider may still
-          finish, and it is not retryable.
+        Phase 3C.2.3.4: the decision is taken under the same lock ``_deliver`` uses to
+        enter the transport, so the two cannot interleave. Each state answers
+        differently, and only the first one is a fact:
+
+        * ``PENDING`` (and no send started) — the attempt provably never entered the
+          transport, so ``CANCELLED`` is true, the reservation is released, and a
+          pending ``_deliver`` will find the job gone from ``PENDING`` and write
+          nothing to the socket;
+        * send started / ``DISPATCHED`` — the frame may be out; the reservation
+          becomes spend, the provider state is ``UNKNOWN``, the job becomes
+          ``UNKNOWN_SUBMISSION`` and :class:`CancellationAmbiguous` is raised;
+        * ``SUBMITTED``/``RUNNING`` — the provider has it. ``CANCELLED`` is recorded
+          locally with an explicit note that the provider may still finish;
+        * a terminal state — rejected, so a second cancel cannot rewrite history.
+
+        ``asyncio.CancelledError`` is a caller cancellation of the *task*, not of the
+        job; it is never raised here and never swallowed anywhere.
         """
-        job = self._jobs.get(job_id)
-        if job is None:
-            raise CoordinatorError("Unknown Flow job.", details={"job_id": job_id})
-        if job.terminal:
-            raise CoordinatorError(
-                "This job is already terminal.", details={"state": job.state.value}
-            )
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise CoordinatorError("Unknown Flow job.", details={"job_id": job_id})
+            if job.terminal:
+                raise CoordinatorError(
+                    "This job is already terminal.", details={"state": job.state.value}
+                )
 
-        if job.state is SubmissionState.DISPATCHED:
-            # Phase 3C.2.3.3: the frame left, so the reservation is spend and the
-            # provider state is unknown — a local cancel cannot recall a submit.
-            self._settle_reservation(job.job_id)
-            job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
-            job.state = SubmissionState.UNKNOWN_SUBMISSION
-            job.error = ErrorDescriptor(
-                FlowErrorCode.UNKNOWN_SUBMISSION,
-                "Cancelled while the submit was in flight. The outcome is unknown and "
-                "will not be resubmitted automatically.",
-                retryable=False,
-                details={"reason": "cancelled_during_submit"},
-            )
+            send_in_flight = job.state is SubmissionState.PENDING and job.send_started
+            if job.state is SubmissionState.PENDING and not job.send_started:
+                # Provable: the transport operation for this attempt has not begun.
+                self._release_reservation(job.job_id)
+                job.state = SubmissionState.CANCELLED
+                job.dispatched = False
+                job.provider_dispatch = ProviderDispatchOutcome.NOT_DISPATCHED
+                job.error = None
+                job.updated_at = self.clock()
+                return job
+
+            if send_in_flight or job.state is SubmissionState.DISPATCHED:
+                # The frame may be out. A local cancel cannot recall it, so the spend
+                # stays and the provider outcome is unknown.
+                self._settle_reservation(job.job_id)
+                job.provider_dispatch = ProviderDispatchOutcome.UNKNOWN
+                job.dispatched = True
+                job.state = SubmissionState.UNKNOWN_SUBMISSION
+                job.error = ErrorDescriptor(
+                    FlowErrorCode.UNKNOWN_SUBMISSION,
+                    "Cancelled while the submit was in flight. The outcome is unknown "
+                    "and will not be resubmitted automatically.",
+                    retryable=False,
+                    details={"reason": "cancelled_during_submit"},
+                )
+                job.updated_at = self.clock()
+                raise CancellationAmbiguous(job.job_id, job.state.value)
+
+            if job.state in {SubmissionState.SUBMITTED, SubmissionState.RUNNING}:
+                job.state = SubmissionState.CANCELLED
+                job.error = ErrorDescriptor(
+                    FlowErrorCode.COMMAND_FAILED,
+                    "Cancelled after submission. The provider may still complete the "
+                    "generation; any media that appears is not attached automatically.",
+                    retryable=False,
+                    details={"provider_may_still_complete": True},
+                )
+            else:
+                job.state = SubmissionState.CANCELLED
+                job.error = None
             job.updated_at = self.clock()
-            raise CancellationAmbiguous(job.job_id, job.state.value)
-
-        if job.state in {SubmissionState.SUBMITTED, SubmissionState.RUNNING}:
-            job.state = SubmissionState.CANCELLED
-            job.error = ErrorDescriptor(
-                FlowErrorCode.COMMAND_FAILED,
-                "Cancelled after submission. The provider may still complete the "
-                "generation; any media that appears is not attached automatically.",
-                retryable=False,
-                details={"provider_may_still_complete": True},
-            )
-        else:
-            job.state = SubmissionState.CANCELLED
-            job.error = None
-        job.updated_at = self.clock()
-        return job
+            return job
 
     # ----------------------------------------------------------- reconcile
     def reconcile(
@@ -1091,15 +1366,22 @@ class GenerationCoordinator:
                 details={"reason": type(exc).__name__},
             ) from exc
 
+        # Phase 3C.2.3.4: bytes may only be accepted from an answer bound to this job.
+        verdict = correlate_result(
+            result,
+            command_id=envelope.id,
+            job_id=job.job_id,
+            request_hash=envelope.request_hash,
+        )
+        if not verdict.ok:
+            raise ExportUnverified(
+                "The export answer was not correlated to this job.",
+                details={"field": verdict.field, "reason": verdict.reason},
+            )
         if not result.ok:
             raise ExportUnverified(
                 "The extension could not export the media.",
                 details={"code": normalise_error(result.error).code.value},
-            )
-        if result.job_id and result.job_id != job.job_id:
-            raise ExportUnverified(
-                "The exported bytes belong to a different job.",
-                details={"expected": job.job_id},
             )
 
         payload = result.result or {}

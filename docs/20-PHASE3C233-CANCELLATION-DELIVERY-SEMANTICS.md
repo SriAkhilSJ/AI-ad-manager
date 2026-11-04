@@ -128,6 +128,12 @@ An absent provider-dispatch field is `UNKNOWN`, never `NOT_DISPATCHED`. A non-bo
 (`"false"`, `0`, `{}`) is `UNKNOWN`. A foreign job id, a foreign command id or a contradictory
 `request_hash` forces `UNKNOWN` and settles the spend.
 
+> **Corrected in Phase 3C.2.3.4.** This milestone compared correlation only when a value was
+> present, so an answer that *omitted* the job id (or the request hash, which did not exist on the
+> wire yet) was still treated as correlated and could still authorize `NOT_DISPATCHED` and a retry.
+> Presence and equality are now both required; a missing field is a rejection. See
+> `docs/21-PHASE3C234-CORRELATION-CLEANUP-CANCEL-RACE.md` §1.
+
 ---
 
 ## 3. Companion relay

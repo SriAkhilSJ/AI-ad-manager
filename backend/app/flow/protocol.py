@@ -401,7 +401,15 @@ class CommandEnvelope(BaseModel):
 
 
 class ResultEnvelope(BaseModel):
-    """Extension -> bridge."""
+    """Extension -> bridge.
+
+    Phase 3C.2.3.4: ``request_hash`` is the echo of :attr:`CommandEnvelope.request_hash`.
+    It is optional on the wire so an older peer still validates, but it is **mandatory
+    evidence** for a submission answer: a result that omits it cannot establish what
+    became of the command, and the coordinator treats it as uncorrelated (settled,
+    never retried). ``id`` and ``job_id`` are mandatory for the same reason — absent
+    correlation values are a rejection, not a wildcard.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -411,6 +419,7 @@ class ResultEnvelope(BaseModel):
     job_id: str = ""
     result: dict[str, Any] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
+    request_hash: str = ""
 
 
 class GenerationCommand(BaseModel):

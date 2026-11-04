@@ -45,6 +45,7 @@ from app.flow.security import generate_pairing_id, generate_pairing_secret
 from app.schemas.flow import CommandResultIn
 from app.services.flow_budget import FlowBudgetLedger
 
+from tests.flow_correlation import correlated
 from tests.test_phase3c231_security_hardening import _request, _release, _verified_decision
 
 IMAGE_ESTIMATE = 0.04
@@ -77,9 +78,10 @@ class Scripted(CommandTransport):
         outcome = self._results.pop(0) if self._results else asyncio.TimeoutError()
         if isinstance(outcome, BaseException):
             raise outcome
-        if getattr(outcome, "id", command_id) != command_id:
-            outcome = outcome.model_copy(update={"id": command_id})
-        return outcome
+        # Phase 3C.2.3.4: a real extension echoes command id, job id and request
+        # hash. Only the values this fixture left empty are filled in.
+        envelope = next((item for item in self.sent if item.id == command_id), None)
+        return correlated(envelope, outcome)
 
 
 class Hanging(CommandTransport):
@@ -135,8 +137,11 @@ class Exploding(CommandTransport):
 
 
 def _ok(media_id: str = "media-0001"):
+    # `id` and `job_id` are left empty on purpose: the scripted transport stamps the
+    # ids of the frame it answers, exactly as a real extension echoes them. Tests
+    # that need a *foreign* value pass it explicitly.
     return proto.ResultEnvelope(
-        type="result", id="cmd", ok=True, job_id="", result={"media_id": media_id}
+        type="result", id="", ok=True, job_id="", result={"media_id": media_id}
     )
 
 
@@ -144,7 +149,7 @@ def _error(dispatched: Any = None, *, code: str = "command_failed", include: boo
     payload: dict[str, Any] = {"code": code, "message": "refused", **extra}
     if include:
         payload["dispatched"] = dispatched
-    return proto.ResultEnvelope(type="result", id="cmd", ok=False, job_id="", error=payload)
+    return proto.ResultEnvelope(type="result", id="", ok=False, job_id="", error=payload)
 
 
 def _coordinator(transport: CommandTransport, ledger: Any = None, **kwargs: Any):
@@ -664,11 +669,13 @@ async def test_dispatch_reports_both_states_for_a_provider_refusal():
     bridge.session = session
 
     async def answer_without_submitting(command_id: str, timeout: float):
+        # Phase 3C.2.3.4: the answer echoes the job it is about, or it cannot be
+        # attributed to that attempt at all.
         return proto.ResultEnvelope(
             type="result",
             id=command_id,
             ok=False,
-            job_id="",
+            job_id="job-1",
             error={"code": "quota", "message": "no quota", "dispatched": False},
         )
 
@@ -737,7 +744,14 @@ class _Bridge:
     async def stop(self) -> None:
         self.started = False
 
-    async def dispatch(self, command: str, payload: dict[str, Any], *, job_id: str = "") -> Any:
+    async def dispatch(
+        self,
+        command: str,
+        payload: dict[str, Any],
+        *,
+        job_id: str = "",
+        request_hash: str = "",
+    ) -> Any:
         self.calls.append((command, payload, job_id))
         if self.error is not None:
             raise self.error
@@ -772,7 +786,13 @@ def _handler(results: list[dict[str, Any]], *, command: str = "status"):
                 200,
                 json={
                     "commands": [
-                        {"id": "cmd-1", "command": command, "payload": {}, "job_id": "job-1"}
+                        {
+                            "id": "cmd-1",
+                            "command": command,
+                            "payload": {},
+                            "job_id": "job-1",
+                            "request_hash": "c" * 64,
+                        }
                     ]
                 },
             )
@@ -844,7 +864,7 @@ async def test_a_cancelled_companion_command_posts_no_false_result():
     results: list[dict[str, Any]] = []
 
     class Cancelling(_Bridge):
-        async def dispatch(self, command, payload, *, job_id=""):
+        async def dispatch(self, command, payload, *, job_id="", request_hash=""):
             raise asyncio.CancelledError()
 
     companion = _companion(_handler(results), Cancelling())
@@ -869,8 +889,18 @@ def test_the_result_schema_rejects_contradictory_states():
             error={"code": "x", "message": "y", "dispatched": False},
         )
     # The honest combinations are accepted, and silence means "not stated".
-    CommandResultIn(command_id="c1", transport="sent", provider_dispatch="not_dispatched")
+    CommandResultIn(
+        command_id="c1",
+        job_id="j1",
+        request_hash="h" * 64,
+        transport="sent",
+        provider_dispatch="not_dispatched",
+        error={"code": "x", "message": "y", "dispatched": False},
+    )
     CommandResultIn(command_id="c1")
+    # Phase 3C.2.3.4: a refusal without correlation is not evidence.
+    with pytest.raises(Exception):
+        CommandResultIn(command_id="c1", transport="sent", provider_dispatch="not_dispatched")
     assert CommandResultIn(command_id="c1").provider_dispatch == ""
 
 
@@ -887,7 +917,7 @@ async def test_a_late_result_after_a_timeout_cannot_re_arm_a_retry():
 
     late = _error(False)
     late.id = "cmd"
-    coordinator._apply_submission_result(job, late, command_id="whatever")
+    await coordinator._apply_submission_result(job, late, envelope=transport.sent[0])
     assert job.state.value == "unknown_submission", "a late answer cannot make it retryable"
     with pytest.raises(UnknownSubmissionRemains):
         await coordinator.retry(job.job_id, approval_binding="b" * 64)

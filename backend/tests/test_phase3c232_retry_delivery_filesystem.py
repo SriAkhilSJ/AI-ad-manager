@@ -68,6 +68,7 @@ from app.services.flow_budget import (
     InvalidBudgetCap,
 )
 
+from tests.flow_correlation import correlated
 from tests.test_phase3c231_security_hardening import (
     _mcp_tree,
     _release,
@@ -98,6 +99,8 @@ class RecordingTransport(CommandTransport):
     async def send(self, envelope) -> DeliveryOutcome:
         self.sent.append(envelope)
         outcome = self._results.pop(0) if self._results else asyncio.TimeoutError()
+        # Phase 3C.2.3.4: a real answer echoes the command it answers.
+        outcome = correlated(envelope, outcome)
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         if isinstance(outcome, BaseException):
             future.set_exception(outcome)

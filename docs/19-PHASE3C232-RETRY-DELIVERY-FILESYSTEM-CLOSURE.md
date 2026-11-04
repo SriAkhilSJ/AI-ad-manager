@@ -178,7 +178,7 @@ the frame.
 | Area | Tests |
 | --- | --- |
 | retry reservation | reserves a fresh estimate; successful retry stays charged; ambiguous retry stays charged; proven non-delivery retry releases only its own reservation |
-| retry gates | expired decision; untrusted decision; missing approval; live flag off; insufficient budget blocks before dispatch; `UNKNOWN_SUBMISSION` non-retryable; `FAILED` without proven non-delivery non-retryable |
+| retry gates | expired decision; untrusted decision; missing approval; live flag off; insufficient budget blocks before dispatch; `UNKNOWN_SUBMISSION` non-retryable; `FAILED` without proven non-delivery non-retryable; Phase 3C.2.3.4 — the evidence must be *present* and correlated (command id, job id, request hash), not merely non-contradictory (`docs/21` §1) |
 | retry concurrency | two concurrent retries cannot both dispatch; repeated retries cannot bypass the cap |
 | delivery classification | returned send = `SENT`; untyped exception = ambiguous; typed failures classify themselves; pre-send refusals are definite |
 | delivery effects | generic exception retains budget and blocks retry; proven non-delivery releases exactly once; confirmed send retains; `not sent`/`uncertain` answers without raising; bridge classifies a missing session and a socket exception; pending futures cleaned up |

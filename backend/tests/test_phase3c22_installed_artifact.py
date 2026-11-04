@@ -1237,8 +1237,16 @@ async def test_the_coordinator_dispatches_only_for_a_verified_artifact(release):
             self.sent.append(envelope)
 
         async def await_result(self, command_id, timeout):  # noqa: ANN001
+            # Phase 3C.2.3.4: the answer echoes the command it answers, including
+            # the job id and the request hash, or it cannot be correlated.
+            envelope = next(item for item in self.sent if item.id == command_id)
             return flowproto.ResultEnvelope(
-                type="result", id=command_id, ok=True, job_id="", result={"media_id": "media-1"}
+                type="result",
+                id=command_id,
+                ok=True,
+                job_id=envelope.job_id,
+                request_hash=envelope.request_hash,
+                result={"media_id": "media-1"},
             )
 
     transport = Transport()

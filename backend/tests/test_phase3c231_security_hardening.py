@@ -86,6 +86,7 @@ from app.services.flow_budget import (
     flow_ledger_from_settings,
 )
 
+from tests.flow_correlation import correlated
 from tests.test_phase3c21_trust_boundaries import _attestation, _package, _review
 from tests.test_phase3c22_installed_artifact import (
     BUILD_ID,
@@ -228,12 +229,18 @@ class _PendingTransport(CommandTransport):
 
     def __init__(self, *, fail_send: bool = False) -> None:
         self.sent: list[proto.CommandEnvelope] = []
+        self.by_id: dict[str, proto.CommandEnvelope] = {}
         self.fail_send = fail_send
 
     async def send(self, envelope: proto.CommandEnvelope) -> None:
         if self.fail_send:
             raise ConnectionError("socket closed before the frame left")
         self.sent.append(envelope)
+        self.by_id[envelope.id] = envelope
+
+    def correlated(self, command_id: str, result: Any) -> Any:
+        """Answer *result* as an extension would: echoing the command it answers."""
+        return correlated(self.by_id.get(command_id), result)
 
     async def await_result(self, command_id: str, timeout: float) -> Any:
         raise asyncio.TimeoutError
@@ -448,8 +455,12 @@ async def test_a_confirmed_dispatch_keeps_the_reservation():
 
     class Answered(_PendingTransport):
         async def await_result(self, command_id, timeout):
-            return proto.ResultEnvelope(
-                type="result", id=command_id, ok=True, job_id="", result={"media_id": "media-0001"}
+            return self.correlated(
+                command_id,
+                proto.ResultEnvelope(
+                    type="result", id=command_id, ok=True, job_id="",
+                    result={"media_id": "media-0001"},
+                ),
             )
 
     coordinator = _coordinator(Answered(), ledger)
@@ -463,12 +474,15 @@ async def test_a_provider_reported_non_dispatch_releases_the_reservation():
 
     class NotDispatched(_PendingTransport):
         async def await_result(self, command_id, timeout):
-            return proto.ResultEnvelope(
-                type="result",
-                id=command_id,
-                ok=False,
-                job_id="",
-                error={"code": "quota", "message": "nope", "dispatched": False},
+            return self.correlated(
+                command_id,
+                proto.ResultEnvelope(
+                    type="result",
+                    id=command_id,
+                    ok=False,
+                    job_id="",
+                    error={"code": "quota", "message": "nope", "dispatched": False},
+                ),
             )
 
     coordinator = _coordinator(NotDispatched(), ledger)

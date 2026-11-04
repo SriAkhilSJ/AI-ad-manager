@@ -32,6 +32,8 @@ from typing import Any
 
 import httpx
 import pytest
+
+from tests.flow_correlation import correlated
 import websockets
 
 from app.core.config import get_settings
@@ -428,6 +430,8 @@ class ScriptedTransport(CommandTransport):
     async def send(self, envelope: proto.CommandEnvelope) -> None:
         self.sent.append(envelope)
         outcome = self._results.pop(0) if self._results else None
+        # Phase 3C.2.3.4: an extension echoes command id, job id and request hash.
+        outcome = correlated(envelope, outcome)
         future: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         if isinstance(outcome, Exception):
             future.set_exception(outcome)

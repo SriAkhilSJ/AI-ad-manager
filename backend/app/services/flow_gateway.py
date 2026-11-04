@@ -82,6 +82,9 @@ class QueuedCommand:
     command: str
     payload: dict[str, Any]
     job_id: str = ""
+    #: Phase 3C.2.3.4: the request hash the command is bound to. The companion echoes
+    #: it with its result so the backend can correlate the report to one attempt.
+    request_hash: str = ""
     created_at: datetime = field(default_factory=_now)
     delivered_at: datetime | None = None
 
@@ -91,6 +94,7 @@ class QueuedCommand:
             "command": self.command,
             "job_id": self.job_id,
             "payload": self.payload,
+            "request_hash": self.request_hash,
             "issued_at": self.created_at.isoformat(),
         }
 
@@ -235,7 +239,13 @@ class FlowCompanionGateway:
 
     # --------------------------------------------------------------- commands
     async def enqueue(
-        self, companion_id: str, command: str, payload: dict[str, Any], *, job_id: str = ""
+        self,
+        companion_id: str,
+        command: str,
+        payload: dict[str, Any],
+        *,
+        job_id: str = "",
+        request_hash: str = "",
     ) -> QueuedCommand:
         proto.ensure_allowed(command)  # CommandDenied for anything else
         queued = QueuedCommand(
@@ -243,6 +253,7 @@ class FlowCompanionGateway:
             command=command,
             payload=dict(payload),
             job_id=job_id,
+            request_hash=request_hash,
         )
         self._queues.setdefault(companion_id, []).append(queued)
         await record_audit(
@@ -251,7 +262,12 @@ class FlowCompanionGateway:
             entity_type="flow_companion_session",
             entity_id=uuid.uuid4(),
             actor_id=None,
-            after={"companion_id": companion_id, "command": command, "job_id": job_id},
+            after={
+                "companion_id": companion_id,
+                "command": command,
+                "job_id": job_id,
+                "request_hash": request_hash,
+            },
         )
         return queued
 

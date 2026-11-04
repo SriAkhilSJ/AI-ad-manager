@@ -34,6 +34,7 @@ from app.core.config import get_settings
 from app.creative.media import encode_png
 from app.flow import protocol as proto
 from app.flow.bridge import BridgeConfig, BridgeConfigError, FlowBridge
+from tests.flow_correlation import correlated
 from app.flow.coordinator import (
     ApprovalRequired,
     CommandTransport,
@@ -559,12 +560,11 @@ class ScriptedTransport(CommandTransport):
 
     async def await_result(self, command_id: str, timeout: float) -> Any:
         result = await asyncio.wait_for(self._pending[command_id], timeout)
-        # Phase 3C.2.3.3: a real extension echoes the command id it answers. The
-        # canned fixtures here use placeholders, so stamp the real id — a *foreign*
-        # id is exercised explicitly by the cancellation/delivery tests.
-        if getattr(result, "id", command_id) != command_id:
-            result = result.model_copy(update={"id": command_id})
-        return result
+        # Phase 3C.2.3.4: a real extension echoes the command id, the job id and the
+        # request hash of the frame it answers. Fixtures here leave those empty; a
+        # deliberately *foreign* value is preserved and still fails correlation.
+        envelope = next((item for item in self.sent if item.id == command_id), None)
+        return correlated(envelope, result)
 
 
 def _request(prompt: str = "A charcoal frame with a terminal glow") -> GenerationCommand:
@@ -575,7 +575,7 @@ def _request(prompt: str = "A charcoal frame with a terminal glow") -> Generatio
 
 def _ok_frame(job_id: str = "", media_id: str = "media-0001") -> ResultEnvelope:
     return ResultEnvelope(
-        type="result", id="cmd", ok=True, job_id=job_id, result={"media_id": media_id}
+        type="result", id="", ok=True, job_id=job_id, result={"media_id": media_id}
     )
 
 
@@ -621,7 +621,7 @@ async def test_only_one_live_generation_at_a_time():
     transport = ScriptedTransport(
         [
             ResultEnvelope(
-                type="result", id="c1", ok=True, job_id="", result={"media_id": "media-0001"}
+                type="result", id="", ok=True, job_id="", result={"media_id": "media-0001"}
             )
         ]
     )
@@ -655,7 +655,7 @@ async def test_failure_after_dispatch_is_treated_as_unknown():
         [
             ResultEnvelope(
                 type="result",
-                id="c1",
+                id="",
                 ok=False,
                 job_id="",
                 error={"code": "command_failed", "message": "the tab crashed"},
@@ -674,7 +674,7 @@ async def test_proven_no_dispatch_failure_is_a_distinct_retryable_state():
         [
             ResultEnvelope(
                 type="result",
-                id="c1",
+                id="",
                 ok=False,
                 job_id="",
                 error={
@@ -684,7 +684,7 @@ async def test_proven_no_dispatch_failure_is_a_distinct_retryable_state():
                 },
             ),
             ResultEnvelope(
-                type="result", id="c2", ok=True, job_id="", result={"media_id": "media-0002"}
+                type="result", id="", ok=True, job_id="", result={"media_id": "media-0002"}
             ),
         ]
     )
@@ -699,7 +699,7 @@ async def test_proven_no_dispatch_failure_is_a_distinct_retryable_state():
 
 async def test_foreign_job_id_cannot_satisfy_a_job():
     transport = ScriptedTransport(
-        [ResultEnvelope(type="result", id="c1", ok=True, job_id="someone-else", result={"media_id": "media-9"})]
+        [ResultEnvelope(type="result", id="", ok=True, job_id="someone-else", result={"media_id": "media-9"})]
     )
     coordinator = GenerationCoordinator(transport, live_generation_enabled=True)
     job = await coordinator.submit("image", _request(), approval_binding="a" * 64)
@@ -749,9 +749,11 @@ async def test_export_requires_a_correlated_media_id():
 
 
 def _export_frame(job_id: str, media: bytes, *, sha: str | None = None, size: int | None = None) -> ResultEnvelope:
+    # `id` is left empty: the scripted transport stamps the export command's id, as a
+    # real extension echoes it (Phase 3C.2.3.4 correlation).
     return ResultEnvelope(
         type="result",
-        id="export-cmd",
+        id="",
         ok=True,
         job_id=job_id,
         result={
@@ -1491,7 +1493,14 @@ class FakeBridge:
             },
         }
 
-    async def dispatch(self, command: str, payload: dict[str, Any], *, job_id: str = "") -> dict[str, Any]:
+    async def dispatch(
+        self,
+        command: str,
+        payload: dict[str, Any],
+        *,
+        job_id: str = "",
+        request_hash: str = "",
+    ) -> dict[str, Any]:
         self.calls.append((command, payload, job_id))
         return {"ready": True}
 

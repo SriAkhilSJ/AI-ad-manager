@@ -313,6 +313,10 @@ def render_markdown(report: dict) -> str:
         add(f"- [ ] Set the credentials as deployment secrets, connect the account via "
             f"`POST /api/v1/social/oauth/{row['platform']}/start`, then run "
             f"`POST /api/v1/social/accounts/{{id}}/verify` and record the result.")
+        add(f"- [ ] Then: `python ../scripts/integration_canary.py --provider "
+            f"{row['platform']} --network --live` and paste the JSON into "
+            f"`docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say "
+            f"`sandbox-verified`.")
     add("")
     add("### C. Paid media")
     add("")
@@ -320,8 +324,9 @@ def render_markdown(report: dict) -> str:
         add(f"- [ ] {row['label']} ({row['api_version']}): supply "
             f"{', '.join('`' + c + '`' for c in row['missing']) or 'credentials'}; "
             f"approval: {row['approval']}.")
-    add("- [ ] Run `POST /api/v1/ads/campaigns/{id}/validate-account` and paste the "
-        "result into the release record.")
+    add("- [ ] Run `POST /api/v1/ads/campaigns/{id}/validate-account` (or "
+        "`python ../scripts/integration_canary.py --provider <platform> --network --live`) "
+        "and paste the result into the release record.")
     add("- [ ] Set `ADS_MAX_AUTHORIZED_SPEND_CENTS` to the real ceiling per "
         "authorisation.")
     add("")

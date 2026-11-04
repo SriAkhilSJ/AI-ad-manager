@@ -316,3 +316,54 @@ establish. The narrative and the blocker list are in
 * Two acceptance assertions referenced runtime fields that do not exist
   (`research_run`, `research_rounds[].findings`), so criterion 19 could only pass
   in one branch. They now assert what the graph actually emits.
+
+---
+
+## Phase 4.3 evidence (2026-11-04 UTC)
+
+Phase 4.3 asked for real-world canaries. This environment cannot reach any
+provider, so the canaries are recorded as blocked with their exact reason rather
+than as passing. The narrative is in
+[`28-PHASE4.3-RELEASE-ASSESSMENT.md`](28-PHASE4.3-RELEASE-ASSESSMENT.md); the
+per-provider detail is generated in
+[`27-INTEGRATION-CANARY-REPORT.md`](27-INTEGRATION-CANARY-REPORT.md) and
+`canary-run.json`.
+
+### Executed
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Canary harness logic (16 tests) | `pytest tests/test_phase4_3_canary_harness.py` | 16 passed — redaction, spend gating, authorisation parsing, no-live-by-default, evidence cannot self-upgrade |
+| Canary run, report + reachability + read-only live | `scripts/integration_canary.py --network --live --write` | 11 providers: all `blocked`; every reachability probe returns `ConnectError: TLS/SSL connection has been closed (EOF)` |
+| Director lifecycle against a live server | `scripts/lifecycle_evidence.py --base-url http://127.0.0.1:8000 --write` | 7/7 governance checks pass; 25 trace entries; 26 checkpoints; final state `completed`/`handed_off`; evidence in `lifecycle-run.json` |
+| Broker round trip in GitHub Actions | `backend-postgres` job, `redis:7-alpine` service | see §"CI" below |
+
+### The CI dependency defect (diagnosed from a real log, not guessed)
+
+The broker job had been failing with exit 2 in under a second and no reachable
+log. A `if: failure()` step now posts the worker log as a commit comment; it
+reported:
+
+```text
+celery/kombu/redis: 5.4.0 5.7.0 5.0.8
+Unrecoverable error: VersionMismatch(
+  'Redis transport requires redis-py versions 6.1.0 or later. You have 5.0.8')
+```
+
+Celery 5.4.0 accepts any `kombu<6`, so an unpinned install resolves kombu 5.7,
+whose Redis transport requires redis-py ≥ 6.1. `requirements.txt` now pins
+`kombu==5.6.2` (declares `redis>=4.5.2,<6.5`) together with `redis==5.0.8`, a pair
+verified locally by a real worker round-trip. The job also gained a `pip check` +
+resolved-versions step, a redis-py readiness probe, a worker step that fails when
+the worker never reports ready, and a unique worker node name.
+
+### Not executed, and therefore not claimed
+
+* **Any provider call.** OpenAI, Replicate, Meta, Google Ads, LinkedIn, X,
+  YouTube and Reddit were all unreachable: TCP connects, TLS is closed. No
+  credential is configured here either.
+* **Any publish.** `PUBLISHING_ENABLED=false`, no connected account, no
+  `--allow-public-post` path exists in the harness.
+* **Any ad creation or spend.** No campaign was created; the ad transports refuse
+  without their own credentials.
+* **Flow.** Still disabled; provenance remains unverified.

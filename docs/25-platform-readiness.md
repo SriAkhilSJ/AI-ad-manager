@@ -1,6 +1,6 @@
 # 25 — Platform readiness and founder checklist
 
-Generated 2026-11-04T15:37:10+00:00 from code + the current environment (`ENVIRONMENT=development`).
+Generated 2026-11-04T15:45:59+00:00 from code + the current environment (`ENVIRONMENT=development`).
 
 **How to read the columns.** `implemented` is what the code does. `mock-tested` means an automated suite exercises it against `httpx.MockTransport`. `credential-configured` is only about presence: the environment variables exist *and* the OAuth prerequisites below are met; it is not evidence that a provider accepted them. `sandbox-verified` and `production-verified` can only be filled by a real call against a real developer account, so both are `no` for every row until one is recorded in `docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because its code exists.
 
@@ -63,6 +63,7 @@ Everything below is a *human* action. Nothing in this repository can do it, and 
   - [ ] PUBLISHING_ENABLED is false
   - [ ] Meta app review for pages_manage_posts + a Page the app is allowed to post to
 - [ ] Set the credentials as deployment secrets, connect the account via `POST /api/v1/social/oauth/facebook/start`, then run `POST /api/v1/social/accounts/{id}/verify` and record the result.
+- [ ] Then: `python ../scripts/integration_canary.py --provider facebook --network --live` and paste the JSON into `docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say `sandbox-verified`.
 
 ### B2. Instagram Business
 
@@ -74,6 +75,7 @@ Everything below is a *human* action. Nothing in this repository can do it, and 
   - [ ] PUBLISHING_ENABLED is false
   - [ ] Meta app review for instagram_content_publish + a Business account linked to a Page
 - [ ] Set the credentials as deployment secrets, connect the account via `POST /api/v1/social/oauth/instagram/start`, then run `POST /api/v1/social/accounts/{id}/verify` and record the result.
+- [ ] Then: `python ../scripts/integration_canary.py --provider instagram --network --live` and paste the JSON into `docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say `sandbox-verified`.
 
 ### B3. LinkedIn Page
 
@@ -85,6 +87,7 @@ Everything below is a *human* action. Nothing in this repository can do it, and 
   - [ ] PUBLISHING_ENABLED is false
   - [ ] LinkedIn Marketing Developer Platform access for the app
 - [ ] Set the credentials as deployment secrets, connect the account via `POST /api/v1/social/oauth/linkedin/start`, then run `POST /api/v1/social/accounts/{id}/verify` and record the result.
+- [ ] Then: `python ../scripts/integration_canary.py --provider linkedin --network --live` and paste the JSON into `docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say `sandbox-verified`.
 
 ### B4. X (Twitter)
 
@@ -96,6 +99,7 @@ Everything below is a *human* action. Nothing in this repository can do it, and 
   - [ ] PUBLISHING_ENABLED is false
   - [ ] X developer app with write access (a paid API tier as of 2025)
 - [ ] Set the credentials as deployment secrets, connect the account via `POST /api/v1/social/oauth/x/start`, then run `POST /api/v1/social/accounts/{id}/verify` and record the result.
+- [ ] Then: `python ../scripts/integration_canary.py --provider x --network --live` and paste the JSON into `docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say `sandbox-verified`.
 
 ### B5. YouTube
 
@@ -107,6 +111,7 @@ Everything below is a *human* action. Nothing in this repository can do it, and 
   - [ ] PUBLISHING_ENABLED is false
   - [ ] Google OAuth consent screen verification for the YouTube upload scope
 - [ ] Set the credentials as deployment secrets, connect the account via `POST /api/v1/social/oauth/youtube/start`, then run `POST /api/v1/social/accounts/{id}/verify` and record the result.
+- [ ] Then: `python ../scripts/integration_canary.py --provider youtube --network --live` and paste the JSON into `docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say `sandbox-verified`.
 
 ### B6. Reddit
 
@@ -118,13 +123,14 @@ Everything below is a *human* action. Nothing in this repository can do it, and 
   - [ ] PUBLISHING_ENABLED is false
   - [ ] Reddit app registration with a script/web app type and a subreddit you moderate
 - [ ] Set the credentials as deployment secrets, connect the account via `POST /api/v1/social/oauth/reddit/start`, then run `POST /api/v1/social/accounts/{id}/verify` and record the result.
+- [ ] Then: `python ../scripts/integration_canary.py --provider reddit --network --live` and paste the JSON into `docs/04-ACCEPTANCE-EVIDENCE.md` before this row may say `sandbox-verified`.
 
 ### C. Paid media
 
 - [ ] Meta Marketing API (Graph v21.0): supply `META_ADS_ACCESS_TOKEN`, `META_ADS_ACCOUNT_ID`; approval: ads_management permission on the ad account + a funded payment method.
 - [ ] Google Ads API (REST v17): supply `GOOGLE_ADS_ACCESS_TOKEN`, `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID`; approval: A developer token approved for the account + a customer id with billing.
 - [ ] LinkedIn Ads API (202405): supply `LINKEDIN_ADS_ACCESS_TOKEN`, `LINKEDIN_ADS_ACCOUNT_URN`; approval: Advertising API access on the LinkedIn app + a sponsored account.
-- [ ] Run `POST /api/v1/ads/campaigns/{id}/validate-account` and paste the result into the release record.
+- [ ] Run `POST /api/v1/ads/campaigns/{id}/validate-account` (or `python ../scripts/integration_canary.py --provider <platform> --network --live`) and paste the result into the release record.
 - [ ] Set `ADS_MAX_AUTHORIZED_SPEND_CENTS` to the real ceiling per authorisation.
 
 ### D. Creative

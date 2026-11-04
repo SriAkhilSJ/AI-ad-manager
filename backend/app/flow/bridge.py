@@ -216,6 +216,15 @@ class BridgeConfig:
                 f"Unsupported artifact digest algorithm {self.digest_algorithm!r}; "
                 f"choose one of {', '.join(SUPPORTED_DIGEST_ALGORITHMS)}."
             )
+        # Additions may only name components the integration knows about. Whether the
+        # signed release actually contains them is checked at measurement time, where
+        # the anchor is resolved (a config check cannot see the manifest).
+        for name in self.required_components:
+            if name not in (COMPONENT_EXTENSION, COMPONENT_MCP, COMPONENT_COMPANION):
+                raise BridgeConfigError(
+                    f"Unknown component {name!r} in FLOW_REQUIRED_COMPONENTS; only "
+                    "known components can be required."
+                )
         seen_components: set[str] = set()
         for spec in self.install_components:
             if spec.component not in (COMPONENT_EXTENSION, COMPONENT_MCP, COMPONENT_COMPANION):
@@ -1097,14 +1106,18 @@ class FlowBridge:
             spec.component: InstallationSpec(
                 root=Path(spec.root).expanduser(),
                 layout=spec.layout,
+                # Phase 3C.2.3.1: identity comes from the independently signed anchor
+                # only. Falling back to the HELLO's self-reported id or version let
+                # the peer fill in whatever the manifest omitted — precisely the
+                # substitution the anchor exists to prevent. A live-capable anchor
+                # always carries both; if it does not, this measurement cannot prove
+                # identity and must not be compared as though it could.
                 expected_extension_id=(
-                    (anchor.extension_id or session.extension_id)
-                    if spec.component == COMPONENT_EXTENSION
-                    else ""
+                    anchor.extension_id if spec.component == COMPONENT_EXTENSION else ""
                 ),
-                expected_version=(anchor.release or session.extension_version)
-                if spec.component == COMPONENT_EXTENSION
-                else "",
+                expected_version=(
+                    anchor.release if spec.component == COMPONENT_EXTENSION else ""
+                ),
                 policy=MeasurementPolicy(digest_algorithm=self.config.digest_algorithm),
             )
             for spec in self.config.install_components
@@ -1139,11 +1152,27 @@ class FlowBridge:
         )
 
     def _source_gate_status(self) -> str:
-        """The upstream gate, read at decision time. Absent source is the norm."""
+        """The upstream gate, read at decision time from the *application* settings.
+
+        Phase 3C.2.3.1: this used to read ``FLOW_SOURCE_PACKAGE_PATH`` from
+        ``os.environ`` directly. Pydantic settings may load that value from ``.env``,
+        where it never appears in the environment — so the bridge could authorize on
+        one configuration source while the API reported another. Both paths now come
+        from the injected settings object, and a missing settings object fails closed.
+        """
+        settings = self.settings
+        if settings is None:
+            # No configuration means no authorization, not a default authorization.
+            return "LICENSING_BLOCKED"
         try:
             from app.flow.source_gate import evaluate_source_gate
 
-            return evaluate_source_gate(os.getenv("FLOW_SOURCE_PACKAGE_PATH", "")).status
+            return evaluate_source_gate(
+                str(getattr(settings, "flow_source_package_path", "") or ""),
+                attestation_path=str(
+                    getattr(settings, "flow_authorization_attestation_path", "") or ""
+                ),
+            ).status
         except Exception:  # noqa: BLE001 - a gate that cannot answer must not authorize
             return "LICENSING_BLOCKED"
 

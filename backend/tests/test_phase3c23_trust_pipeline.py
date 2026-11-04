@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +77,7 @@ from app.flow.trust import (
 from app.services.flow_budget import (
     BudgetUnavailable,
     FlowBudgetLedger,
+    InvalidBudgetCap,
     flow_ledger_from_settings,
 )
 
@@ -488,10 +490,15 @@ def _report(name: str, digest: str = "", **overrides: Any) -> ComponentReport:
 # 5 — a manifest-required component cannot be dropped by configuration
 # --------------------------------------------------------------------------- #
 def test_configuration_cannot_downgrade_the_signed_requirement(release):
+    """Phase 3C.2.3.1: ``FLOW_REQUIRED_COMPONENTS`` is additive, so a shorter
+    configured list cannot shrink the manifest's requirement. The old
+    ``required_component_downgrade`` failure is gone; the union is computed instead,
+    and a submission missing the manifest's component still fails verification.
+    """
     attestation = SessionAttestation(
         store=ChallengeStore(),
         anchor=release["anchor"],
-        required_components=(COMPONENT_EXTENSION,),  # config says extension only
+        required_components=(COMPONENT_EXTENSION,),  # config names the extension only
     )
     assert set(attestation.effective_required_components()) == {
         COMPONENT_EXTENSION,
@@ -514,7 +521,8 @@ def test_configuration_cannot_downgrade_the_signed_requirement(release):
         hello_version=VERSION,
         hello_digest="",
     )
-    assert "required_component_downgrade" in evidence.failures
+    assert "required_component_downgrade" not in evidence.failures
+    assert f"component_not_measured:{COMPONENT_MCP}" in evidence.failures
     assert evidence.component_states[COMPONENT_MCP] == "NOT_MEASURED"
 
 
@@ -855,9 +863,14 @@ async def test_missing_budget_enforcement_blocks_a_verified_generation(release):
         budget_ledger=None,  # nothing to reserve against
     )
     assert coordinator.idempotency_enforced is True
-    with pytest.raises(BudgetUnavailable):
-        ledger = FlowBudgetLedger(cap_usd=0.0)
-        ledger.reserve(kind="image")
+    # Phase 3C.2.3.1: a zero cap is no longer a ledger that refuses at reserve time;
+    # it is not a ledger at all, because "0" reads as unlimited to everybody who
+    # skims it. Only a finite, positive cap builds an enforceable ledger.
+    with pytest.raises(InvalidBudgetCap):
+        FlowBudgetLedger(cap_usd=0.0)
+    assert flow_ledger_from_settings(SimpleNamespace(
+        flow_budget_enforcement="none", flow_generation_budget_usd=5.0
+    )) is None
     await coordinator.submit("image", _request(), approval_binding="a" * 64, idempotency_key="k1")
     # A coordinator without a ledger will dispatch when the *caller* forgets the
     # guard; that is why the guard is the only entry point to it.

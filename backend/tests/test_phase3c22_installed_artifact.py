@@ -150,6 +150,9 @@ def _manifest_document(
     document: dict[str, Any] = {
         "schema": schema,
         "product": "deepx-flow-connector",
+        # Phase 3C.2.3.1: a live-capable release declares its digest semantics; an
+        # anchor that leaves them implicit is not live-capable.
+        "digest_algorithm": "sha256-tree-runtime-v1",
         "release": {
             "version": version,
             "commit": commit,
@@ -535,22 +538,39 @@ def test_an_unexpected_version_is_refused(release):
 
 
 def test_a_file_added_during_measurement_fails_the_report(release, monkeypatch):
+    """Phase 3C.2.3.1: a file appearing in a directory mid-scan fails the scan.
+
+    The injection is done *through the directory descriptor the scan is using*, which
+    is the only way a writer can add an entry to the directory being measured. The
+    scan re-lists each directory against its descriptor and refuses the mismatch.
+    """
     import app.flow.installed_artifact as module
 
-    real_walk = module._walk_regular_files
-    calls = {"n": 0}
+    real_read = module._read_file_at
+    injected = {"done": False}
 
-    def walk_then_mutate(root, *, max_files, exclusions=frozenset()):
-        calls["n"] += 1
-        found = real_walk(root, max_files=max_files, exclusions=exclusions)
-        if calls["n"] == 2:
-            (Path(root) / "injected.js").write_text("// injected mid-measurement\n", encoding="utf-8")
-        return found
+    def read_then_inject(dir_fd, name, relative, *, max_bytes):
+        data, st = real_read(dir_fd, name, relative, max_bytes=max_bytes)
+        if not injected["done"] and relative != "manifest.json":
+            injected["done"] = True
+            fd = os.open(
+                "injected.js",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o644,
+                dir_fd=dir_fd,
+            )
+            try:
+                os.write(fd, b"// injected mid-measurement\n")
+            finally:
+                os.close(fd)
+        return data, st
 
-    monkeypatch.setattr(module, "_walk_regular_files", walk_then_mutate)
+    monkeypatch.setattr(module, "_read_file_at", read_then_inject)
     with pytest.raises(MeasurementError) as excinfo:
         InstalledArtifactVerifier().measure(release["spec"])
     assert excinfo.value.code == "file_added_during_measurement"
+    assert injected["done"] is True
+    (release["root"] / "injected.js").unlink()
 
 
 def test_a_file_changed_during_measurement_fails_the_report(release, monkeypatch):
@@ -590,29 +610,18 @@ def test_a_file_changed_during_measurement_fails_the_report(release, monkeypatch
 
 
 def test_a_replaced_file_is_detected_by_inode_check(release, monkeypatch):
-    target = (release["root"] / "sw.js").resolve()
-    real_lstat = os.lstat
+    """The name must still point at the inode that was read, checked by descriptor."""
+    real_stat = os.stat
 
-    def swapping_lstat(path):
-        result = real_lstat(path)
-        # abspath, not resolve: resolve() itself calls lstat and would recurse.
-        if os.path.abspath(str(path)) == str(target):
-            values = (
-                result.st_mode,
-                result.st_ino + 1,
-                result.st_dev,
-                result.st_nlink,
-                result.st_uid,
-                result.st_gid,
-                result.st_size,
-                result.st_atime,
-                result.st_mtime,
-                result.st_ctime,
-            )
+    def swapping_stat(path, *args, **kwargs):
+        result = real_stat(path, *args, **kwargs)
+        if kwargs.get("dir_fd") is not None and str(path) == "sw.js":
+            values = list(result)
+            values[1] = result.st_ino + 1  # st_ino
             return os.stat_result(values)
         return result
 
-    monkeypatch.setattr(os, "lstat", swapping_lstat)
+    monkeypatch.setattr(os, "stat", swapping_stat)
     with pytest.raises(MeasurementError) as excinfo:
         InstalledArtifactVerifier().measure(release["spec"])
     assert excinfo.value.code == "file_replaced_during_measurement"

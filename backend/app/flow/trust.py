@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import logging
 import secrets
 import time
@@ -463,12 +464,39 @@ class SessionAttestation:
         )
 
         required = self.effective_required_components()
-        config_set = set(self.required_components)
-        manifest_set = set(self.anchor.required_components)
-        # An empty configuration list is not a declaration, so it cannot downgrade
-        # anything: the manifest alone decides. A *non-empty* list that omits a
-        # manifest requirement is an attempt to shrink the requirement set.
-        downgrade = bool(config_set) and bool(manifest_set - config_set)
+        # Phase 3C.2.3.1: ``required_components`` is *additive*, never a replacement
+        # list. An earlier revision treated a non-empty list that did not repeat a
+        # manifest requirement as a "downgrade", which rejected the documented use
+        # of the setting (add `local_companion` to a release that requires the MCP
+        # server). The manifest is preserved by the union below, so nothing can be
+        # removed — the check is for unknown names, not for omissions.
+        unknown_additions = sorted(
+            name for name in set(self.required_components) if name not in KNOWN_COMPONENTS
+        )
+        if unknown_additions:
+            raise AttestationRejected(
+                "unknown_component_addition",
+                f"Configuration added unknown component(s) {', '.join(unknown_additions)}; "
+                "only known components can be required.",
+                details={"components": unknown_additions},
+            )
+
+        # An addition may only *add*. A configured component that the signed release
+        # does not describe has no expected digest, so it could never be verified;
+        # accepting the submission would leave a permanently unverifiable requirement
+        # that looks satisfied because the submission was accepted at all.
+        unbacked_additions = sorted(
+            name
+            for name in set(self.required_components)
+            if name != COMPONENT_EXTENSION and not self.anchor.digest_for(name)
+        )
+        if unbacked_additions:
+            raise AttestationRejected(
+                "component_addition_not_in_release",
+                f"Configuration requires component(s) the signed release does not "
+                f"describe: {', '.join(unbacked_additions)}.",
+                details={"components": unbacked_additions},
+            )
 
         seen: set[str] = set()
         for report in submission.components:
@@ -499,8 +527,6 @@ class SessionAttestation:
 
         measured_digest = self._validated_digest(extension, "chrome_extension")
         self._validate_report_metadata(extension, challenge)
-        if downgrade:
-            failures.append("required_component_downgrade")
 
         expected_digest = self.anchor.digest_for(COMPONENT_EXTENSION)
         digest_matches = bool(expected_digest) and hmac.compare_digest(measured_digest, expected_digest)
@@ -879,7 +905,18 @@ class SpendingControls:
 
     @property
     def active(self) -> bool:
-        return self.ledger_wired and self.enforcement == "flow_budget_ledger" and self.cap_usd > 0
+        """A real control: wired, enforced, and *finite*.
+
+        Phase 3C.2.3.1: ``cap_usd > 0`` accepted ``float("inf")``, so a ledger could
+        be built with an infinite cap and the guard would report an active control
+        that can never refuse anything. A spend limit must be finite.
+        """
+        return (
+            self.ledger_wired
+            and self.enforcement == "flow_budget_ledger"
+            and math.isfinite(self.cap_usd)
+            and self.cap_usd > 0
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {

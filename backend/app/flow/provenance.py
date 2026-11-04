@@ -60,6 +60,8 @@ from typing import Any
 
 from app.flow import protocol as proto
 
+#: Chrome extension ids are 32 characters drawn from a-p.
+CHROME_EXTENSION_ID = re.compile(r"^[a-p]{32}$")
 #: ``1.2.1``, ``1.2.1-beta.2``, ``1.2.1+build.7``.
 SEMVER = re.compile(r"^(?P<major>\d{1,4})\.(?P<minor>\d{1,4})\.(?P<patch>\d{1,4})(?:[-+][0-9A-Za-z.\-]{1,32})?$")
 #: Short or full git SHA.
@@ -192,11 +194,16 @@ class TrustAnchor:
     def live_capable(self) -> bool:
         """Whether this anchor can ever support a live generation decision.
 
-        Phase 3C.2.3: a signature proves authenticity of a *release*, not that every
-        executable was identified. Live capability needs the v2 schema, a verified
-        signature, individually identified components, and a digest for every
-        component the release itself marks required. A pinned single digest and a
-        legacy v1 manifest are readable but never live-capable.
+        A signature proves authenticity of a *release*; it does not prove that the
+        anchor says enough to compare an installation against. Phase 3C.2.3 required
+        the v2 schema, a verified signature, per-component digests and a digest for
+        every required component. Phase 3C.2.3.1 closes the remaining hole: a
+        **validly signed but incomplete** v2 manifest — one with a valid extension
+        digest and nothing else — was live-capable, so "signed" stood in for
+        "identified". Live capability now also requires the release version, source
+        commit, build identity, extension id, protocol and digest algorithm, all
+        present and well-formed. A pinned single digest and a legacy v1 manifest
+        remain readable and are never live-capable.
         """
         if self.source != ANCHOR_MANIFEST:
             return False
@@ -204,9 +211,25 @@ class TrustAnchor:
             return False
         if not self.signature_verified or not self.identifies_components:
             return False
+        # Release identity: who/what/when, all explicit in the signed document.
+        if not SEMVER.match(self.release):
+            return False
+        if not SOURCE_COMMIT.match(self.source_commit):
+            return False
+        if not BUILD_ID.match(self.build_id):
+            return False
+        if not CHROME_EXTENSION_ID.match(self.extension_id):
+            return False
+        if not self.protocol or self.protocol not in proto.SUPPORTED_PROTOCOLS:
+            return False
+        # Digest semantics must be declared, not assumed from this process's default.
+        if not self.digest_algorithm or self.digest_algorithm not in RUNTIME_DIGEST_ALGORITHMS:
+            return False
         if not SHA256.match(self.artifact_sha256):
             return False
-        for name in self.required_components:
+        # The extension always matters, and every component the release marks
+        # required must carry a digest of its own.
+        for name in {COMPONENT_EXTENSION, *self.required_components}:
             if not SHA256.match(self.components.get(name, "")):
                 return False
         return True

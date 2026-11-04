@@ -282,6 +282,10 @@ class GenerationCoordinator:
         #: idempotency key -> (job id, request hash). A key may only ever map to one
         #: request; reuse with a different payload is refused, not silently merged.
         self._by_idempotency: dict[str, tuple[str, str]] = {}
+        #: job id -> reserved estimate, for the window between reservation and
+        #: dispatch. Phase 3C.2.3.1: a reservation must never be leaked, so it is
+        #: tracked explicitly and released only on provable non-delivery.
+        self._reservations: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------ views
@@ -317,8 +321,20 @@ class GenerationCoordinator:
             "max_live_jobs": self.max_live_jobs,
             "live_jobs": len(self.live_jobs),
             "lifecycle_counts": self.lifecycle_counts(),
+            "budget": self.budget_ledger.snapshot() if self.budget_ledger is not None else None,
             "jobs": [job.as_dict() for job in self.jobs[:20]],
         }
+
+    # ------------------------------------------------------------- budget
+    def _release_reservation(self, job_id: str) -> None:
+        """Refund a reservation only when the attempt provably never left."""
+        estimate = self._reservations.pop(job_id, None)
+        if estimate is not None and self.budget_ledger is not None:
+            self.budget_ledger.release(estimate)
+
+    def _settle_reservation(self, job_id: str) -> None:
+        """Dispatched: the estimate becomes spend and is never refunded."""
+        self._reservations.pop(job_id, None)
 
     # --------------------------------------------------------------- submit
     async def submit(
@@ -357,14 +373,13 @@ class GenerationCoordinator:
                 )
         if not approval_binding:
             raise ApprovalRequired()
-        # Phase 3C.2.3 §9: a real reservation against a real cap. With no ledger the
-        # caller holds no budget control, and the live guard refuses before we get
-        # here; a ledger that cannot cover the estimate raises rather than guessing.
-        estimate = self.budget_ledger.reserve(kind=kind) if self.budget_ledger is not None else 0.0
 
         key = (idempotency_key or request.idempotency_key or "").strip()
         request_hash = request.request_hash()
 
+        # Phase 3C.2.3.1: nothing below this point may reserve until the request is
+        # known to be a genuinely new attempt. A replay, a conflicting key or a live
+        # job costs nothing — the earlier code reserved first and refunded never.
         async with self._lock:
             if key:
                 existing = self._by_idempotency.get(key)
@@ -380,18 +395,31 @@ class GenerationCoordinator:
                 current = self.live_jobs[0]
                 raise JobInProgress(current.job_id, len(self.live_jobs))
 
-            job = FlowJob(
-                job_id=job_id or new_id(),
-                kind=kind,
-                request=request,
-                approval_binding=approval_binding,
-                created_at=self.clock(),
-                updated_at=self.clock(),
+            # Exactly one reservation, for exactly one new attempt, taken under the
+            # same lock that proves the attempt is new: two concurrent submissions
+            # cannot both pass the checks and then overspend the ledger.
+            estimate = (
+                self.budget_ledger.reserve(kind=kind) if self.budget_ledger is not None else 0.0
             )
-            self._jobs[job.job_id] = job
-            self._by_request[request_hash] = job.job_id
-            if key:
-                self._by_idempotency[key] = (job.job_id, request_hash)
+            try:
+                job = FlowJob(
+                    job_id=job_id or new_id(),
+                    kind=kind,
+                    request=request,
+                    approval_binding=approval_binding,
+                    created_at=self.clock(),
+                    updated_at=self.clock(),
+                )
+                self._jobs[job.job_id] = job
+                self._by_request[request_hash] = job.job_id
+                if key:
+                    self._by_idempotency[key] = (job.job_id, request_hash)
+                if estimate:
+                    self._reservations[job.job_id] = estimate
+            except BaseException:
+                if estimate and self.budget_ledger is not None:
+                    self.budget_ledger.release(estimate)
+                raise
 
         envelope = CommandEnvelope(
             id=new_id(),
@@ -414,6 +442,9 @@ class GenerationCoordinator:
         try:
             await self.transport.send(envelope)
         except Exception as exc:  # noqa: BLE001 - transport failure before dispatch
+            # The frame never left, so the reservation is returned. This is the only
+            # pre-dispatch failure path, and it is the only place a refund happens.
+            self._release_reservation(job.job_id)
             job.state = SubmissionState.FAILED
             job.dispatched = False
             job.attempts = 1
@@ -426,7 +457,9 @@ class GenerationCoordinator:
             job.updated_at = self.clock()
             return job
 
-        # From this line on, the submit action exists in the world.
+        # From this line on, the submit action exists in the world. The reservation
+        # stays tracked until the outcome is known, so the *only* refund that can
+        # happen later is a provider statement that nothing was dispatched.
         job.dispatched = True
         job.attempts = 1
         job.state = SubmissionState.DISPATCHED
@@ -448,6 +481,7 @@ class GenerationCoordinator:
             )
 
         if result.ok:
+            self._settle_reservation(job.job_id)
             job.result = dict(result.result)
             media_id = str(result.result.get("media_id") or "")
             if media_id:
@@ -468,13 +502,17 @@ class GenerationCoordinator:
         if dispatched is False:
             # The provider says the submit never happened: a retry is safe, so the
             # dispatch flag is cleared alongside the state. Absent an explicit
-            # ``dispatched: false`` the attempt stays ambiguous by construction.
+            # ``dispatched: false`` the attempt stays ambiguous by construction —
+            # and an ambiguous attempt keeps its reservation, because it may have
+            # been billed even though it produced nothing.
+            self._release_reservation(job.job_id)
             job.dispatched = False
             job.state = SubmissionState.FAILED
             job.error = ErrorDescriptor(
                 descriptor.code, descriptor.message, retryable=True, details=descriptor.details
             )
         else:
+            self._settle_reservation(job.job_id)
             job.state = SubmissionState.UNKNOWN_SUBMISSION
             job.error = ErrorDescriptor(
                 FlowErrorCode.UNKNOWN_SUBMISSION,
@@ -489,6 +527,9 @@ class GenerationCoordinator:
     def _mark_unknown(
         self, job: FlowJob, reason: str, *, foreign: str = ""
     ) -> FlowJob:
+        # The attempt was dispatched and its outcome is unknown: the reservation
+        # becomes spend and is never refunded.
+        self._settle_reservation(job.job_id)
         job.state = SubmissionState.UNKNOWN_SUBMISSION
         job.error = ErrorDescriptor(
             FlowErrorCode.UNKNOWN_SUBMISSION,
@@ -569,10 +610,14 @@ class GenerationCoordinator:
                 job.state = SubmissionState.COMPLETED
             else:
                 job.state = SubmissionState.SUBMITTED
+            if job.state in {SubmissionState.FAILED, SubmissionState.COMPLETED}:
+                # Terminal: the reservation is spend, and the tracking entry goes.
+                self._settle_reservation(job.job_id)
         else:
             descriptor = normalise_error(result.error)
             job.error = descriptor
             job.state = SubmissionState.FAILED
+            self._settle_reservation(job.job_id)
         job.updated_at = self.clock()
         return job
 

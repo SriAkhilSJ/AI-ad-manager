@@ -41,7 +41,7 @@ had holes. Each is named here with the change that closes it.
 | D1 | The **extension** could submit a "verification report" over its own socket, and the bridge would accept it | the message types `verification_challenge` / `verification_report` are **deleted** from `protocol.py`; the bridge performs the measurement itself (§3) |
 | D2 | Trust had no validity deadline; a decision stayed trusted while the socket stayed open | `TrustEvidence.measurement_expires_at` + `TrustDecision.valid_until`/`is_fresh()`/`expired_copy()`; both `current_trust()` and the live guard re-check at use time (§9) |
 | D3 | A v1 manifest, or a pinned extension digest alone, could reach `VERIFIED` | `TrustAnchor.live_capable` — v2 schema, verified signature, component identity, SHA-256 for every required component — is a hard precondition in `aggregate_trust()` (§8) |
-| D4 | Configuration could silently measure fewer components than the release declares | `effective_required_components()` = manifest ∪ config; an explicit narrower config is recorded as a `required_component_downgrade` failure (§7) |
+| D4 | Configuration could silently measure fewer components than the release declares | `effective_required_components()` = `{chrome_extension} ∪ manifest ∪ config`; the union makes a narrower config *impossible*, and additions the release does not describe are refused (§7) |
 | D5 | The live guard was passed `budget_configured=True` by its caller | `SpendingControls` derived from a real `FlowBudgetLedger`; the coordinator reserves against the same ledger (§13) |
 | D6 | The licensing digest excluded `node_modules`/`.venv`/`__pycache__`, so a patched dependency kept the release digest | a second, versioned profile `sha256-tree-runtime-v1` measures dependencies; the algorithm is declared in the signed manifest and must agree (§11) |
 
@@ -54,7 +54,11 @@ A decision is `VERIFIED` only when **all** of the following hold, checked in thi
    separate question from release authenticity (§12);
 2. an anchor is configured and present;
 3. the anchor is **live-capable** — `crusor.flow.release.v2`, Ed25519 signature verified
-   against a key configured outside the package, a digest for every required component;
+   against a key configured outside the package, **and a complete identity**: well-formed
+   release version, source commit, build id, Chrome extension id, supported protocol,
+   explicitly declared digest algorithm, and a digest for every required component. A valid
+   signature over an incomplete document is authentic but not identifying, so it is not
+   live-capable (Phase 3C.2.3.1 §3 of `docs/18`);
 4. the session's HELLO is internally consistent (no component-version drift);
 5. an installed artifact was **measured** — by this process, not reported by the peer;
 6. the measurement carries no failure (no missing/duplicate/unknown component, no mismatch);
@@ -120,7 +124,7 @@ become one `ComponentInstallSpec` per component:
 | `FLOW_MCP_INSTALL_ROOT` | the MCP server directory | *(empty)* |
 | `FLOW_MCP_INSTALL_LAYOUT` | `tree` (a plain directory, measured whole) or `directory` | `tree` |
 | `FLOW_COMPANION_INSTALL_ROOT` / `_LAYOUT` | the companion's own installation | *(empty)*, `tree` |
-| `FLOW_REQUIRED_COMPONENTS` | **additional** required components, comma-separated | *(empty — the manifest decides)* |
+| `FLOW_REQUIRED_COMPONENTS` | **additional** required components, comma-separated (strictly additive — the manifest's set is always enforced too) | *(empty — the manifest decides)* |
 | `FLOW_ARTIFACT_DIGEST_ALGORITHM` | which digest profile the manifest and measurement use | `sha256-tree-runtime-v1` |
 | `FLOW_MEASUREMENT_FRESHNESS_SECONDS` | validity window | `300` (fails closed) |
 
@@ -170,10 +174,15 @@ that a required component has no root *before* a session is refused (`measuremen
 The signed manifest's `required` components are a **floor**:
 
 * `effective_required_components()` returns `{chrome_extension} ∪ manifest.required ∪
-  config.required`;
-* a non-empty `FLOW_REQUIRED_COMPONENTS` that omits a manifest requirement records a
-  `required_component_downgrade` failure — it is never silently honoured, and an empty setting
-  is not a declaration, so the default cannot look like one;
+  config.required` — the setting is **strictly additive**. Adding `local_companion` does *not*
+  require repeating `mcp_server`, because the manifest's requirement is in the union
+  unconditionally; there is no "replacement list" mode and no separate setting for one;
+* an addition naming an unknown component is rejected at config time (`BridgeConfigError`) and
+  again at `accept()` (`unknown_component_addition`);
+* an addition naming a component the signed release does not describe has no expected digest,
+  so it could never verify; the submission is refused with
+  `component_addition_not_in_release` rather than accepted with a permanently unverifiable
+  requirement (§17.1 of `docs/18`);
 * a required component that is not in the release at all fails with
   `component_not_in_release:<name>`;
 * a required component that was not measured is `NOT_MEASURED` and fails
@@ -194,7 +203,8 @@ neither can produce a live-capable session:
 | --- | --- | --- | --- |
 | `crusor.flow.release.v1` + `artifact.sha256` | yes | no | **no** |
 | pinned `FLOW_TRUSTED_ARTIFACT_SHA256` | yes | no | **no** |
-| `crusor.flow.release.v2` (signed, all components) | yes | yes | yes |
+| `crusor.flow.release.v2` (signed, **complete** identity: version, source commit, build id, extension id, protocol, declared digest algorithm, a digest for every required component) | yes | yes | yes |
+| `crusor.flow.release.v2` (signed but incomplete) | yes | yes | **no** |
 
 `aggregate_trust()` returns `UNVERIFIED` with `anchor_not_live_capable` for the first two, even
 when every other evidence field is perfect. A single extension digest cannot describe a
@@ -280,15 +290,18 @@ even if every other condition were somehow satisfied.
 ## 13. Budget and idempotency
 
 `SpendingControls.active` is true only when a `FlowBudgetLedger` is wired **and** carries a
-positive cap **and** the enforcement mode is `flow_budget_ledger`. Defaults
+**finite, positive** cap **and** the enforcement mode is `flow_budget_ledger`. Defaults
 (`FLOW_BUDGET_ENFORCEMENT=none`, `FLOW_GENERATION_BUDGET_USD=0`) report
-`budget_controls_missing`; zero is never "unlimited".
+`budget_controls_missing`; zero is never "unlimited", and an infinite or NaN cap builds no
+ledger at all (`InvalidBudgetCap`, Phase 3C.2.3.1 §1 of `docs/18`).
 
 The bridge builds one ledger from settings and hands the *same* object to the guard and to the
 coordinator, so "a control exists" and "the control is enforced" cannot describe two different
-things. The coordinator reserves immediately before building an envelope, releases if a
-dispatch is rejected before it leaves, raises `BudgetUnavailable` when the cap cannot cover the
-estimate, and reports `idempotency_enforced` from the key→request map it actually uses.
+things. The coordinator checks replay and existing-job rejection *before* reserving, reserves
+exactly once per genuinely new attempt, raises `BudgetUnavailable` when the cap cannot cover the
+estimate, refunds only when dispatch is provably not delivered (a send failure, or a provider
+result that states `dispatched: false`), never refunds after an ambiguous or confirmed dispatch,
+and reports `idempotency_enforced` from the key→request map it actually uses.
 
 ## 14. Required adversarial tests
 

@@ -32,11 +32,13 @@ than producing a digest of a package that never existed.
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
 import os
 import re
 import stat
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -247,37 +249,121 @@ class MeasurementReport:
         return data
 
 
-def _safe_open_read(path: Path, root: Path, *, max_bytes: int) -> tuple[bytes, os.stat_result]:
-    """Read a file so that a concurrent change cannot be mistaken for content.
+#: Phase 3C.2.3.1 — descriptor-relative traversal. Every lookup below happens
+#: against a directory file descriptor with ``O_NOFOLLOW``, so a parent directory
+#: that is renamed, replaced or turned into a symlink mid-scan cannot redirect a
+#: read. Platforms without these primitives are refused rather than downgraded to
+#: path-based checks, which cannot make the same guarantee.
+DIR_FD_SUPPORTED = bool(
+    getattr(os, "O_DIRECTORY", 0)
+    and hasattr(os, "supports_dir_fd")
+    and hasattr(os, "supports_fd")
+    and os.open in os.supports_dir_fd
+    and os.stat in os.supports_dir_fd
+    and os.stat in os.supports_follow_symlinks
+    and os.scandir in os.supports_fd
+)
 
-    * ``O_NOFOLLOW`` refuses a symlink at the final component;
-    * the bytes come from the descriptor, not the path, so a rename/replace during
-      the read cannot mix two files;
-    * ``fstat`` before/after and ``lstat`` after catch size, mtime and inode
-      changes, and the path no longer naming the inode that was read.
-    """
-    try:
-        resolved = path.resolve(strict=False)
-        resolved.relative_to(root)
-    except (ValueError, OSError) as exc:
+_OPEN_DIR_FLAGS = (
+    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+)
+_OPEN_FILE_FLAGS = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+
+
+def _require_descriptor_traversal() -> None:
+    if not DIR_FD_SUPPORTED:
         raise MeasurementError(
-            "path_outside_root",
-            f"{path} does not resolve inside the configured root.",
-            details={"path": str(path)},
-        ) from exc
+            "unsupported_platform",
+            "This platform does not offer descriptor-relative lookups "
+            "(openat-style os.open/os.stat with dir_fd, plus scandir on a descriptor), "
+            "so the traversal race guarantees cannot be made. Crusor refuses to "
+            "measure rather than fall back to path-based checks that look equivalent "
+            "and are not.",
+            details={"platform": sys.platform, "o_directory": bool(getattr(os, "O_DIRECTORY", 0))},
+        )
 
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+
+def _open_root_dir(root: Path) -> int:
+    """Open the configured root itself, refusing a symlink at that last component."""
     try:
-        fd = os.open(path, flags)
+        return os.open(str(root), _OPEN_DIR_FLAGS)
     except OSError as exc:
-        if os.path.islink(path):
+        if exc.errno == errno.ELOOP:
             raise MeasurementError(
                 "symlink_in_package",
-                f"{path} is a symbolic link; a measurement never follows one.",
-                details={"path": str(path)},
+                f"{root} is a symbolic link; a measurement never follows one.",
+                details={"root": str(root)},
             ) from exc
         raise MeasurementError(
-            "file_unreadable", f"{path} could not be opened: {exc.strerror}", details={"path": str(path)}
+            "installed_artifact_not_found",
+            f"The configured installation {str(root)!r} could not be opened: {exc.strerror}.",
+            details={"root": str(root)},
+        ) from exc
+
+
+def _open_child_dir(parent_fd: int, name: str, relative: str) -> int:
+    """Open ``name`` relative to ``parent_fd``; a symlink is never followed."""
+    try:
+        child = os.open(name, _OPEN_DIR_FLAGS, dir_fd=parent_fd)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise MeasurementError(
+                "symlink_in_package",
+                f"{relative} is a symbolic link; a measurement never follows one.",
+                details={"path": relative},
+            ) from exc
+        raise MeasurementError(
+            "directory_replaced_during_measurement",
+            f"{relative} could not be opened as a directory: {exc.strerror}.",
+            details={"path": relative},
+        ) from exc
+    # What we opened must be what the parent currently names.
+    try:
+        opened = os.fstat(child)
+        named = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        os.close(child)
+        raise MeasurementError(
+            "directory_replaced_during_measurement",
+            f"{relative} changed while it was being opened.",
+            details={"path": relative},
+        ) from exc
+    if (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino):
+        os.close(child)
+        raise MeasurementError(
+            "directory_replaced_during_measurement",
+            f"{relative} was replaced by a different directory during measurement.",
+            details={"path": relative},
+        )
+    return child
+
+
+def _read_file_at(
+    dir_fd: int, name: str, relative: str, *, max_bytes: int
+) -> tuple[bytes, os.stat_result]:
+    """Read one file by descriptor, relative to an already-open directory.
+
+    * the open is ``openat``-style with ``O_NOFOLLOW``, so no component below the
+      directory descriptor is resolved through a path the caller could have swapped;
+    * the bytes come from the descriptor, so a rename in the same directory cannot
+      mix two files;
+    * ``fstat`` before/after plus a final ``stat(name, dir_fd=…)`` catch size, mtime
+      and inode changes, and a name that no longer points at the inode we read.
+    """
+    try:
+        fd = os.open(name, _OPEN_FILE_FLAGS, dir_fd=dir_fd)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise MeasurementError(
+                "symlink_in_package",
+                f"{relative} is a symbolic link; a measurement never follows one.",
+                details={"path": relative},
+            ) from exc
+        raise MeasurementError(
+            "file_unreadable",
+            f"{relative} could not be opened: {exc.strerror}",
+            details={"path": relative},
         ) from exc
 
     try:
@@ -285,14 +371,14 @@ def _safe_open_read(path: Path, root: Path, *, max_bytes: int) -> tuple[bytes, o
         if not stat.S_ISREG(before.st_mode):
             raise MeasurementError(
                 "unsupported_file_type",
-                f"{path} is not a regular file.",
-                details={"path": str(path)},
+                f"{relative} is not a regular file.",
+                details={"path": relative},
             )
         if before.st_size > max_bytes:
             raise MeasurementError(
                 "file_too_large",
-                f"{path} is larger than the per-file measurement limit.",
-                details={"path": str(path), "size": before.st_size, "limit": max_bytes},
+                f"{relative} is larger than the per-file measurement limit.",
+                details={"path": relative, "size": before.st_size, "limit": max_bytes},
             )
         chunks: list[bytes] = []
         remaining = before.st_size
@@ -302,12 +388,11 @@ def _safe_open_read(path: Path, root: Path, *, max_bytes: int) -> tuple[bytes, o
                 break
             chunks.append(chunk)
             remaining -= len(chunk)
-        # A file that grew is a file that changed mid-read.
         if os.read(fd, 1):
             raise MeasurementError(
                 "file_mutated_during_measurement",
-                f"{path} grew while it was being measured.",
-                details={"path": str(path)},
+                f"{relative} grew while it was being measured.",
+                details={"path": relative},
             )
         after = os.fstat(fd)
     finally:
@@ -317,15 +402,10 @@ def _safe_open_read(path: Path, root: Path, *, max_bytes: int) -> tuple[bytes, o
     if len(data) != before.st_size:
         raise MeasurementError(
             "file_mutated_during_measurement",
-            f"{path} returned fewer bytes than its size reported.",
-            details={"path": str(path)},
+            f"{relative} returned fewer bytes than its size reported.",
+            details={"path": relative},
         )
-    if (
-        before.st_size,
-        before.st_mtime_ns,
-        before.st_ino,
-        before.st_dev,
-    ) != (
+    if (before.st_size, before.st_mtime_ns, before.st_ino, before.st_dev) != (
         after.st_size,
         after.st_mtime_ns,
         after.st_ino,
@@ -333,90 +413,232 @@ def _safe_open_read(path: Path, root: Path, *, max_bytes: int) -> tuple[bytes, o
     ):
         raise MeasurementError(
             "file_mutated_during_measurement",
-            f"{path} changed while it was being measured.",
-            details={"path": str(path)},
+            f"{relative} changed while it was being measured.",
+            details={"path": relative},
         )
     try:
-        current = os.lstat(path)
+        current = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     except OSError as exc:
         raise MeasurementError(
             "file_replaced_during_measurement",
-            f"{path} disappeared during measurement.",
-            details={"path": str(path)},
+            f"{relative} disappeared during measurement.",
+            details={"path": relative},
         ) from exc
     if stat.S_ISLNK(current.st_mode):
         raise MeasurementError(
             "symlink_in_package",
-            f"{path} became a symbolic link during measurement.",
-            details={"path": str(path)},
+            f"{relative} became a symbolic link during measurement.",
+            details={"path": relative},
         )
     if (current.st_ino, current.st_dev) != (before.st_ino, before.st_dev):
         raise MeasurementError(
             "file_replaced_during_measurement",
-            f"{path} was replaced by a different file during measurement.",
-            details={"path": str(path)},
+            f"{relative} was replaced by a different file during measurement.",
+            details={"path": relative},
         )
     return data, before
 
 
-def _walk_regular_files(
-    root: Path, *, max_files: int, exclusions: frozenset[str] = frozenset()
-) -> list[Path]:
-    """Every regular file under ``root``, refusing symlinks and special files.
+@dataclass
+class _ScanResult:
+    """Every regular file read during one descriptor-relative scan."""
 
-    Enumeration failures are fatal: an unreadable directory means the measurement
-    is incomplete, and an incomplete measurement must never be compared against a
-    digest as if it were whole.
-    """
-    found: list[Path] = []
-    errors: list[str] = []
+    entries: list[tuple[str, bytes, os.stat_result]] = field(default_factory=list)
+    total_bytes: int = 0
 
-    def on_error(exc: OSError) -> None:
-        errors.append(f"{exc.filename}: {exc.strerror}")
+    @property
+    def files(self) -> list[str]:
+        return [relative for relative, _, _ in self.entries]
 
-    for current, dirnames, filenames in os.walk(root, followlinks=False, onerror=on_error):
-        here = Path(current)
-        for name in sorted(dirnames):
-            candidate = here / name
-            if os.path.islink(candidate):
-                raise MeasurementError(
-                    "symlink_in_package",
-                    f"{candidate} is a symbolic link; a measurement never follows one.",
-                    details={"path": str(candidate)},
-                )
-        dirnames[:] = sorted(name for name in dirnames if name not in exclusions)
-        for name in sorted(filenames):
-            if name in ALWAYS_EXCLUDED_FILES:
-                continue
-            candidate = here / name
-            mode = os.lstat(candidate).st_mode
-            if stat.S_ISLNK(mode):
-                raise MeasurementError(
-                    "symlink_in_package",
-                    f"{candidate} is a symbolic link; a measurement never follows one.",
-                    details={"path": str(candidate)},
-                )
-            if not stat.S_ISREG(mode):
-                raise MeasurementError(
-                    "unsupported_file_type",
-                    f"{candidate} is not a regular file.",
-                    details={"path": str(candidate)},
-                )
-            found.append(candidate)
-            if len(found) > max_files:
-                raise MeasurementError(
-                    "too_many_files",
-                    "The installation contains more files than the measurement limit allows.",
-                    details={"limit": max_files},
-                )
-    if errors:
+
+def _scan_directory(
+    fd: int,
+    *,
+    prefix: str,
+    exclusions: frozenset[str],
+    policy: MeasurementPolicy,
+    state: _ScanResult,
+) -> None:
+    """Walk one directory by descriptor, failing closed on any instability."""
+    try:
+        with os.scandir(fd) as iterator:
+            entries = sorted(iterator, key=lambda entry: entry.name)
+            first_names = [entry.name for entry in entries]
+            stats: dict[str, os.stat_result] = {}
+            for entry in entries:
+                try:
+                    stats[entry.name] = entry.stat(follow_symlinks=False)
+                except OSError as exc:
+                    raise MeasurementError(
+                        "enumeration_failed",
+                        f"{prefix}{entry.name} could not be inspected: {exc.strerror}.",
+                        details={"path": f"{prefix}{entry.name}"},
+                    ) from exc
+    except OSError as exc:
         raise MeasurementError(
             "enumeration_failed",
-            "Part of the installation could not be enumerated, so the measurement is "
-            "incomplete.",
-            details={"errors": errors[:8]},
+            f"The directory {prefix or '.'} could not be enumerated: {exc.strerror}.",
+            details={"path": prefix or "."},
+        ) from exc
+
+    read_in_this_directory: list[tuple[str, str, os.stat_result]] = []
+    for name in first_names:
+        if name in ALWAYS_EXCLUDED_FILES:
+            continue
+        relative = f"{prefix}{name}"
+        info = stats[name]
+        mode = info.st_mode
+        if stat.S_ISLNK(mode):
+            raise MeasurementError(
+                "symlink_in_package",
+                f"{relative} is a symbolic link; a measurement never follows one.",
+                details={"path": relative},
+            )
+        if stat.S_ISDIR(mode):
+            if name in exclusions:
+                continue
+            child = _open_child_dir(fd, name, relative)
+            try:
+                _scan_directory(
+                    child,
+                    prefix=f"{relative}/",
+                    exclusions=exclusions,
+                    policy=policy,
+                    state=state,
+                )
+            finally:
+                os.close(child)
+            continue
+        if not stat.S_ISREG(mode):
+            raise MeasurementError(
+                "unsupported_file_type",
+                f"{relative} is not a regular file.",
+                details={"path": relative},
+            )
+        data, fst = _read_file_at(fd, name, relative, max_bytes=policy.max_file_bytes)
+        if (fst.st_dev, fst.st_ino) != (info.st_dev, info.st_ino):
+            raise MeasurementError(
+                "file_replaced_during_measurement",
+                f"{relative} was replaced between directory enumeration and reading.",
+                details={"path": relative},
+            )
+        state.total_bytes += len(data)
+        if state.total_bytes > policy.max_total_bytes:
+            raise MeasurementError(
+                "package_too_large",
+                "The installation is larger than the measurement limit allows.",
+                details={"limit": policy.max_total_bytes},
+            )
+        state.entries.append((relative, data, fst))
+        read_in_this_directory.append((name, relative, data, fst))
+        if len(state.entries) > policy.max_files:
+            raise MeasurementError(
+                "too_many_files",
+                "The installation contains more files than the measurement limit allows.",
+                details={"limit": policy.max_files},
+            )
+
+    # Revalidate every file this directory contributed *after* the whole directory
+    # has been read: a same-inode rewrite keeps the inode check happy, so size and
+    # mtime are compared again here rather than trusted from the read.
+    for name, relative, data, recorded in read_in_this_directory:
+        try:
+            current = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except OSError as exc:
+            raise MeasurementError(
+                "file_replaced_during_measurement",
+                f"{relative} disappeared before the scan of this directory finished.",
+                details={"path": relative},
+            ) from exc
+        if (current.st_ino, current.st_dev) != (recorded.st_ino, recorded.st_dev):
+            raise MeasurementError(
+                "file_replaced_during_measurement",
+                f"{relative} was replaced by a different file during the scan.",
+                details={"path": relative},
+            )
+        if (
+            (current.st_size, current.st_mtime_ns, current.st_ctime_ns)
+            != (recorded.st_size, recorded.st_mtime_ns, recorded.st_ctime_ns)
+        ):
+            raise MeasurementError(
+                "file_mutated_during_measurement",
+                f"{relative} changed after it was read, before the scan finished.",
+                details={"path": relative},
+            )
+        # Timestamps are not evidence: this filesystem can hand a freed inode back
+        # with an unchanged size *and* an unchanged mtime. Re-read the bytes through a
+        # fresh descriptor and compare them, so a same-size rewrite cannot pass.
+        try:
+            again, _ = _read_file_at(fd, name, relative, max_bytes=policy.max_file_bytes)
+        except MeasurementError:
+            raise
+        except OSError as exc:
+            raise MeasurementError(
+                "file_replaced_during_measurement",
+                f"{relative} could not be re-read: {exc.strerror}.",
+                details={"path": relative},
+            ) from exc
+        if again != data:
+            raise MeasurementError(
+                "file_mutated_during_measurement",
+                f"{relative} no longer contains the bytes that were measured.",
+                details={"path": relative},
+            )
+
+    # The directory's own listing must be unchanged: an entry added or removed while
+    # we were reading it means the measured set is not the set that was there.
+    try:
+        with os.scandir(fd) as iterator:
+            second_names = sorted(entry.name for entry in iterator)
+    except OSError as exc:
+        raise MeasurementError(
+            "enumeration_failed",
+            f"The directory {prefix or '.'} could not be re-enumerated: {exc.strerror}.",
+            details={"path": prefix or "."},
+        ) from exc
+    if second_names != first_names:
+        raise MeasurementError(
+            "file_added_during_measurement",
+            f"The directory {prefix or '.'} changed while it was being measured.",
+            details={
+                "path": prefix or ".",
+                "added": sorted(set(second_names) - set(first_names))[:16],
+                "removed": sorted(set(first_names) - set(second_names))[:16],
+            },
         )
-    return found
+
+
+def _scan_tree(
+    root_fd: int, *, exclusions: frozenset[str], policy: MeasurementPolicy
+) -> _ScanResult:
+    state = _ScanResult()
+    _scan_directory(root_fd, prefix="", exclusions=exclusions, policy=policy, state=state)
+    return state
+
+
+def _assert_root_still_the_same(root: Path, root_fd: int) -> None:
+    """The configured root path must still name the descriptor we measured."""
+    try:
+        named = os.lstat(root)
+    except OSError as exc:
+        raise MeasurementError(
+            "root_replaced_during_measurement",
+            f"The installation root {str(root)!r} disappeared during measurement.",
+            details={"root": str(root)},
+        ) from exc
+    if stat.S_ISLNK(named.st_mode):
+        raise MeasurementError(
+            "symlink_in_package",
+            f"The installation root {str(root)!r} became a symbolic link during measurement.",
+            details={"root": str(root)},
+        )
+    measured = os.fstat(root_fd)
+    if (named.st_dev, named.st_ino) != (measured.st_dev, measured.st_ino):
+        raise MeasurementError(
+            "root_replaced_during_measurement",
+            f"The installation root {str(root)!r} was replaced by a different directory.",
+            details={"root": str(root)},
+        )
 
 
 def declared_files(manifest: dict[str, Any]) -> set[str]:
@@ -460,39 +682,27 @@ def declared_files(manifest: dict[str, Any]) -> set[str]:
     return names
 
 
-def _relative_name(path: Path, root: Path) -> str:
-    relative = path.relative_to(root)
-    if any(part in {"..", ""} for part in relative.parts) or relative.is_absolute():
-        raise MeasurementError(
-            "unsafe_relative_path",
-            f"{path} does not have a safe path relative to the installation root.",
-            details={"path": str(path)},
-        )
-    return PurePosixPath(relative).as_posix()
+def normalized_relative_path(declared: str, *, field: str = "path") -> str:
+    """Validate a manifest-declared path and return it as a POSIX relative name.
 
-
-def _resolve_declared_file(root: Path, declared: str) -> Path:
-    """Validate a manifest-declared path before touching it."""
+    Nothing is resolved and nothing is opened: the declaration is checked for
+    emptiness, absoluteness and ``..`` components, then compared against names that
+    came from the descriptor scan. A path that needs resolving to be safe is not
+    something a measurement should accept.
+    """
     text = str(declared or "").strip()
     if not text:
-        raise MeasurementError("invalid_package_layout", "The manifest declared an empty path.")
+        raise MeasurementError(
+            "invalid_package_layout", f"The manifest declared an empty {field}."
+        )
     candidate = PurePosixPath(text)
     if candidate.is_absolute() or any(part in {"..", ""} for part in candidate.parts):
         raise MeasurementError(
             "unsafe_relative_path",
-            f"The manifest declared an unsafe path ({text!r}).",
+            f"The manifest declared an unsafe {field} ({text!r}).",
             details={"path": text},
         )
-    resolved = (root / candidate).resolve(strict=False)
-    try:
-        resolved.relative_to(root)
-    except ValueError as exc:
-        raise MeasurementError(
-            "path_outside_root",
-            f"The manifest path {text!r} resolves outside the installation root.",
-            details={"path": text},
-        ) from exc
-    return resolved
+    return candidate.as_posix()
 
 
 def component_frame(report: MeasurementReport) -> dict[str, Any]:
@@ -533,25 +743,38 @@ class InstalledArtifactVerifier:
     # ------------------------------------------------------------------ public
     def measure(self, spec: InstallationSpec) -> MeasurementReport:
         spec = spec.validate()
+        _require_descriptor_traversal()
         root = self._validate_root(spec.root)
+        root_fd = _open_root_dir(root)
+        try:
+            return self._measure_open_root(root=root, root_fd=root_fd, spec=spec)
+        finally:
+            os.close(root_fd)
+
+    def _measure_open_root(
+        self, *, root: Path, root_fd: int, spec: InstallationSpec
+    ) -> MeasurementReport:
         started = time.time()
         checks: list[str] = []
 
-        extension_id, directory_version = self._identity_from_layout(root, spec)
+        extension_id, directory_version = self._identity_from_layout(root_fd, root, spec)
         checks.append(f"layout_{spec.layout}")
 
         if spec.layout == LAYOUT_TREE:
-            return self._measure_tree(root=root, spec=spec, started=started, checks=checks)
+            return self._measure_tree(
+                root=root, root_fd=root_fd, spec=spec, started=started, checks=checks
+            )
 
-        manifest_path = root / "manifest.json"
-        if not manifest_path.is_file():
+        try:
+            os.stat("manifest.json", dir_fd=root_fd, follow_symlinks=False)
+        except OSError as exc:
             raise MeasurementError(
                 "missing_manifest",
                 "The installation has no manifest.json, so it cannot be identified.",
                 details={"root": str(root)},
-            )
-        manifest_bytes, _ = _safe_open_read(
-            manifest_path, root, max_bytes=spec.policy.max_file_bytes
+            ) from exc
+        manifest_bytes, _ = _read_file_at(
+            root_fd, "manifest.json", "manifest.json", max_bytes=spec.policy.max_file_bytes
         )
         manifest = self._parse_manifest(manifest_bytes)
         checks.append("manifest_present")
@@ -593,54 +816,25 @@ class InstalledArtifactVerifier:
             )
         checks.append("extension_identity_matches_expected")
 
-        service_worker = self._service_worker_path(root, manifest, spec.policy)
+        service_worker = self._service_worker_relative(manifest, spec.policy)
         if service_worker:
             checks.append("service_worker_resolved")
 
-        exclusions = _EXCLUSIONS[spec.policy.digest_algorithm]
-        before_listing = sorted(
-            _relative_name(path, root)
-            for path in _walk_regular_files(
-                root, max_files=spec.policy.max_files, exclusions=exclusions
-            )
+        state = _scan_tree(
+            root_fd,
+            exclusions=_EXCLUSIONS[spec.policy.digest_algorithm],
+            policy=spec.policy,
         )
-        pairs: list[tuple[str, bytes]] = []
-        files: list[MeasuredFile] = []
-        total = 0
-        for path in _walk_regular_files(
-            root, max_files=spec.policy.max_files, exclusions=exclusions
-        ):
-            relative = _relative_name(path, root)
-            data, st = _safe_open_read(path, root, max_bytes=spec.policy.max_file_bytes)
-            total += len(data)
-            if total > spec.policy.max_total_bytes:
-                raise MeasurementError(
-                    "package_too_large",
-                    "The installation is larger than the measurement limit allows.",
-                    details={"limit": spec.policy.max_total_bytes},
-                )
-            pairs.append((relative, data))
-            files.append(
-                MeasuredFile(path=relative, size=len(data), sha256=hashlib.sha256(data).hexdigest())
-            )
-
-        after_listing = sorted(
-            _relative_name(path, root)
-            for path in _walk_regular_files(
-                root, max_files=spec.policy.max_files, exclusions=exclusions
-            )
-        )
-        if before_listing != after_listing:
-            added = sorted(set(after_listing) - set(before_listing))
-            removed = sorted(set(before_listing) - set(after_listing))
-            raise MeasurementError(
-                "file_added_during_measurement",
-                "The installation changed while it was being measured.",
-                details={"added": added[:16], "removed": removed[:16]},
-            )
-        checks.append("listing_stable")
+        _assert_root_still_the_same(root, root_fd)
+        checks.append("descriptor_relative_traversal")
+        checks.append("directory_listings_stable")
         checks.append("files_read_stable")
 
+        pairs = [(relative, data) for relative, data, _ in state.entries]
+        files = [
+            MeasuredFile(path=relative, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+            for relative, data, _ in state.entries
+        ]
         if not files:
             raise MeasurementError(
                 "unsupported_package_layout", "The installation contains no files to measure."
@@ -648,8 +842,7 @@ class InstalledArtifactVerifier:
         self._enforce_file_policy(
             manifest,
             files=files,
-            service_worker=service_worker,
-            root=root,
+            service_worker_relative=service_worker,
             policy=spec.policy,
         )
         checks.append("file_policy_satisfied")
@@ -664,15 +857,18 @@ class InstalledArtifactVerifier:
             extension_id=extension_id,
             extension_version=version,
             manifest_version=int(manifest.get("manifest_version") or 0),
-            service_worker=str(service_worker.relative_to(root).as_posix()) if service_worker else "",
+            service_worker=service_worker,
             file_count=len(files),
-            total_bytes=total,
+            total_bytes=state.total_bytes,
             started_at=started,
             finished_at=time.time(),
             files=tuple(files),
             limitations=(
                 "local_filesystem_only: this measures files on disk, not the code the "
                 "browser has loaded into memory",
+                "no_atomic_snapshot: each directory listing and each file is checked for "
+                "stability, and the root is re-checked afterwards, but a writer that "
+                "restores every inode between checks is not detectable",
                 "no_runtime_correlation: no browser interface is used, so the running "
                 "extension is not proven to be this directory",
                 "host_trust_assumed: a compromised machine with write access to this "
@@ -682,7 +878,13 @@ class InstalledArtifactVerifier:
         )
 
     def _measure_tree(
-        self, *, root: Path, spec: InstallationSpec, started: float, checks: list[str]
+        self,
+        *,
+        root: Path,
+        root_fd: int,
+        spec: InstallationSpec,
+        started: float,
+        checks: list[str],
     ) -> MeasurementReport:
         """Measure a directory that carries no Chrome manifest.
 
@@ -692,49 +894,20 @@ class InstalledArtifactVerifier:
         authority for *what* this directory should contain is the signed release
         manifest, so the digest of the whole tree is the entire comparison.
         """
-        exclusions = _EXCLUSIONS[spec.policy.digest_algorithm]
-        before_listing = sorted(
-            _relative_name(path, root)
-            for path in _walk_regular_files(
-                root, max_files=spec.policy.max_files, exclusions=exclusions
-            )
+        state = _scan_tree(
+            root_fd,
+            exclusions=_EXCLUSIONS[spec.policy.digest_algorithm],
+            policy=spec.policy,
         )
-        pairs: list[tuple[str, bytes]] = []
-        files: list[MeasuredFile] = []
-        total = 0
-        for path in _walk_regular_files(
-            root, max_files=spec.policy.max_files, exclusions=exclusions
-        ):
-            relative = _relative_name(path, root)
-            data, _ = _safe_open_read(path, root, max_bytes=spec.policy.max_file_bytes)
-            total += len(data)
-            if total > spec.policy.max_total_bytes:
-                raise MeasurementError(
-                    "package_too_large",
-                    "The installation is larger than the measurement limit allows.",
-                    details={"limit": spec.policy.max_total_bytes},
-                )
-            pairs.append((relative, data))
-            files.append(
-                MeasuredFile(path=relative, size=len(data), sha256=hashlib.sha256(data).hexdigest())
-            )
-        after_listing = sorted(
-            _relative_name(path, root)
-            for path in _walk_regular_files(
-                root, max_files=spec.policy.max_files, exclusions=exclusions
-            )
-        )
-        if before_listing != after_listing:
-            raise MeasurementError(
-                "file_added_during_measurement",
-                "The installation changed while it was being measured.",
-                details={
-                    "added": sorted(set(after_listing) - set(before_listing))[:16],
-                    "removed": sorted(set(before_listing) - set(after_listing))[:16],
-                },
-            )
-        checks.append("listing_stable")
+        _assert_root_still_the_same(root, root_fd)
+        checks.append("descriptor_relative_traversal")
+        checks.append("directory_listings_stable")
         checks.append("files_read_stable")
+        pairs = [(relative, data) for relative, data, _ in state.entries]
+        files = [
+            MeasuredFile(path=relative, size=len(data), sha256=hashlib.sha256(data).hexdigest())
+            for relative, data, _ in state.entries
+        ]
         if not files:
             raise MeasurementError(
                 "unsupported_package_layout", "The installation contains no files to measure."
@@ -751,13 +924,16 @@ class InstalledArtifactVerifier:
             manifest_version=0,
             service_worker="",
             file_count=len(files),
-            total_bytes=total,
+            total_bytes=state.total_bytes,
             started_at=started,
             finished_at=time.time(),
             files=tuple(files),
             limitations=(
                 "local_filesystem_only: this measures files on disk, not the code the "
                 "process has loaded into memory",
+                "no_atomic_snapshot: each directory listing and each file is checked for "
+                "stability, and the root is re-checked afterwards, but a writer that "
+                "restores every inode between checks is not detectable",
                 "no_process_correlation: the running component is not proven to be this "
                 "directory",
                 "host_trust_assumed: a compromised machine with write access to this "
@@ -810,7 +986,9 @@ class InstalledArtifactVerifier:
             )
         return resolved
 
-    def _identity_from_layout(self, root: Path, spec: InstallationSpec) -> tuple[str, str]:
+    def _identity_from_layout(
+        self, root_fd: int, root: Path, spec: InstallationSpec
+    ) -> tuple[str, str]:
         """Work out which extension this directory claims to be.
 
         ``versioned`` is Chrome's real layout — ``Extensions/<id>/<version>/`` — so
@@ -839,7 +1017,7 @@ class InstalledArtifactVerifier:
                 )
             return extension_id, version
 
-        key = self._manifest_key_of(root, spec)
+        key = self._manifest_key_of(root_fd, spec)
         if not key:
             raise MeasurementError(
                 "unsupported_package_layout",
@@ -850,11 +1028,14 @@ class InstalledArtifactVerifier:
             )
         return chrome_extension_id_from_key(key), ""
 
-    def _manifest_key_of(self, root: Path, spec: InstallationSpec) -> str:
-        path = root / "manifest.json"
-        if not path.is_file():
+    def _manifest_key_of(self, root_fd: int, spec: InstallationSpec) -> str:
+        try:
+            os.stat("manifest.json", dir_fd=root_fd, follow_symlinks=False)
+        except OSError:
             return ""
-        data, _ = _safe_open_read(path, root, max_bytes=spec.policy.max_file_bytes)
+        data, _ = _read_file_at(
+            root_fd, "manifest.json", "manifest.json", max_bytes=spec.policy.max_file_bytes
+        )
         return str(self._parse_manifest(data).get("key") or "").strip()
 
     def _parse_manifest(self, data: bytes) -> dict[str, Any]:
@@ -879,54 +1060,47 @@ class InstalledArtifactVerifier:
         key = str(manifest.get("key") or "").strip()
         return chrome_extension_id_from_key(key) if key else ""
 
-    def _service_worker_path(
-        self, root: Path, manifest: dict[str, Any], policy: MeasurementPolicy
-    ) -> Path | None:
+    def _service_worker_relative(
+        self, manifest: dict[str, Any], policy: MeasurementPolicy
+    ) -> str:
+        """The declared service worker as a validated, normalized relative path.
+
+        No filesystem access happens here: the declaration is checked for safety and
+        the measured file set decides whether it exists. Comparing a *path object*
+        against the scanned set was how a same-named file in a subdirectory could
+        stand in for the real worker.
+        """
         background = manifest.get("background")
         background = background if isinstance(background, dict) else {}
         declared = str(background.get("service_worker") or "").strip()
         if not declared:
             scripts = background.get("scripts")
             if isinstance(scripts, list) and scripts:
-                declared = str(scripts[0])
+                declared = str(scripts[0]).strip()
         if not declared:
             if policy.require_service_worker:
                 raise MeasurementError(
                     "missing_service_worker",
                     "The manifest declares no background service worker or script.",
                 )
-            return None
-        path = _resolve_declared_file(root, declared)
-        if path.is_symlink():
-            raise MeasurementError(
-                "symlink_in_package",
-                "The declared service worker is a symbolic link.",
-                details={"path": declared},
-            )
-        if not path.is_file():
-            raise MeasurementError(
-                "missing_service_worker",
-                f"The declared service worker {declared!r} is not present.",
-                details={"path": declared},
-            )
-        return path
+            return ""
+        return normalized_relative_path(declared, field="service_worker")
 
     def _enforce_file_policy(
         self,
         manifest: dict[str, Any],
         *,
         files: list[MeasuredFile],
-        service_worker: Path | None,
-        root: Path,
+        service_worker_relative: str,
         policy: MeasurementPolicy,
     ) -> None:
         names = {item.path for item in files}
         if "manifest.json" not in names:
             raise MeasurementError("missing_manifest", "manifest.json is missing from the package.")
-        if service_worker is not None:
+        if service_worker_relative:
             # Exact normalized relative path: a different file with the same
             # basename (`vendor/sw.js` vs `sw.js`) must not satisfy this check.
-            relative = service_worker.relative_to(root).as_posix()
+            relative = service_worker_relative
             if relative not in names:
                 raise MeasurementError(
                     "missing_service_worker",

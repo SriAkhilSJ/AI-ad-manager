@@ -213,7 +213,10 @@ def evaluate_source_gate(
 ) -> SourceGate:
     """Decide, from the filesystem alone, whether upstream work is permitted."""
     remediation = tuple(_remediation_requirements())
-    configured = str(package_path or os.getenv("FLOW_SOURCE_PACKAGE_PATH", "") or "").strip()
+    # Phase 3C.2.3.1: no environment fallback. The caller supplies the path from the
+    # same settings object the rest of the application uses; an omitted path means
+    # "no source", never "read a different configuration source".
+    configured = str(package_path or "").strip()
 
     if not configured:
         return _blocked(
@@ -268,7 +271,9 @@ def evaluate_source_gate(
         )
 
     attestation = load_attestation(
-        attestation_path or os.getenv("FLOW_AUTHORIZATION_ATTESTATION_PATH", ""),
+        # Explicit only, for the same reason as the package path above: the
+        # attestation must be the one the application is configured with.
+        attestation_path or "",
         package_root=root,
         observed_digest=digest,
         evidence=evidence,

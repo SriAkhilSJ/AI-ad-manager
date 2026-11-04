@@ -231,6 +231,11 @@ async def companion_result(
             "job_id": payload.job_id,
             "ok": payload.ok,
             "error_code": str((payload.error or {}).get("code") or ""),
+            # Phase 3C.2.3.3: the two events are recorded separately. An empty
+            # string means the companion did not state it, which is not the same as
+            # "not dispatched" and must never be read that way.
+            "transport": payload.transport,
+            "provider_dispatch": payload.provider_dispatch,
         },
     )
     await session.commit()

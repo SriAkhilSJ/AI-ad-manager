@@ -109,3 +109,57 @@ def classify_send_exception(exc: BaseException) -> DeliveryOutcome:
     if isinstance(declared, DeliveryOutcome):
         return declared
     return DeliveryOutcome.MAY_HAVE_BEEN_SENT
+
+
+class ProviderDispatchOutcome(str, Enum):
+    """Whether the *extension* submitted a generation to the external provider.
+
+    Phase 3C.2.3.3. This is a different event from :class:`DeliveryOutcome`, and the
+    two were previously collapsed into one field: a provider ``dispatched:false``
+    used to be recorded as transport ``DEFINITELY_NOT_SENT``, which rewrote history —
+    the WebSocket frame *had* been delivered, and the extension may well have read it.
+
+    ``UNKNOWN`` is the only safe default. A missing field, an absent response, a
+    timeout, a cancellation or an uncorrelated result all leave it ``UNKNOWN``.
+    """
+
+    NOT_DISPATCHED = "not_dispatched"
+    DISPATCHED = "dispatched"
+    UNKNOWN = "unknown"
+
+
+def classify_provider_dispatch(value: Any) -> ProviderDispatchOutcome:
+    """Map an upstream ``dispatched`` flag to a provider-dispatch outcome.
+
+    Only the two Python booleans carry meaning. ``None``, a string, a number or a
+    missing key are all ``UNKNOWN`` — never ``NOT_DISPATCHED``, because an absent
+    field is not evidence that nothing was submitted.
+    """
+
+    if value is True:
+        return ProviderDispatchOutcome.DISPATCHED
+    if value is False:
+        return ProviderDispatchOutcome.NOT_DISPATCHED
+    return ProviderDispatchOutcome.UNKNOWN
+
+
+class DispatchFailed(DeliveryFailure):
+    """A ``FlowBridge.dispatch()`` that produced no result, carrying both states.
+
+    ``delivery`` describes Crusor → extension; ``provider`` describes extension →
+    provider. They are independent, and a failure after a successful transport send
+    must never be reported as ``DEFINITELY_NOT_SENT``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "flow_command_failed",
+        delivery: DeliveryOutcome = DeliveryOutcome.MAY_HAVE_BEEN_SENT,
+        provider: ProviderDispatchOutcome = ProviderDispatchOutcome.UNKNOWN,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, outcome=delivery, details=details)
+        self.code = code
+        self.provider = provider

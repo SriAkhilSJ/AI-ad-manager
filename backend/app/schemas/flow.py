@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class FlowBindingIn(BaseModel):
@@ -86,6 +86,14 @@ class CompanionDisconnectIn(BaseModel):
 
 
 class CommandResultIn(BaseModel):
+    """A companion's report about one command it handled.
+
+    Phase 3C.2.3.3: transport delivery and provider dispatch are separate events and
+    travel separately. Both are optional (an older companion simply omits them, which
+    the backend records as *unknown*, never as non-delivery), and the two must not
+    contradict each other.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     companion_id: str = Field(default="", max_length=128)
@@ -94,6 +102,34 @@ class CommandResultIn(BaseModel):
     ok: bool = False
     result: dict[str, Any] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
+    #: Crusor → extension delivery of this command.
+    transport: Literal["", "definitely_not_sent", "may_have_been_sent", "sent"] = ""
+    #: extension → provider dispatch. ``unknown`` is the safe default when unstated.
+    provider_dispatch: Literal["", "not_dispatched", "dispatched", "unknown"] = ""
+
+    @model_validator(mode="after")
+    def _states_do_not_contradict(self) -> "CommandResultIn":
+        # A provider can only be "not dispatched" if the frame either never left or
+        # was delivered and *explicitly* refused by a correlated provider answer —
+        # never while delivery itself is uncertain.
+        if self.provider_dispatch == "not_dispatched" and self.transport == "may_have_been_sent":
+            raise ValueError(
+                "provider_dispatch 'not_dispatched' contradicts transport "
+                "'may_have_been_sent': an ambiguous send cannot establish that no "
+                "generation was submitted."
+            )
+        if self.provider_dispatch == "dispatched" and self.transport == "definitely_not_sent":
+            raise ValueError(
+                "provider_dispatch 'dispatched' contradicts transport "
+                "'definitely_not_sent'."
+            )
+        error = self.error if isinstance(self.error, dict) else {}
+        if error.get("dispatched") is False and self.transport == "may_have_been_sent":
+            raise ValueError(
+                "A result may not claim 'dispatched: false' while its transport "
+                "delivery is 'may_have_been_sent'."
+            )
+        return self
 
 
 class CompanionSessionOut(BaseModel):

@@ -83,7 +83,14 @@ from app.flow.trust import (
     spending_controls_from_settings,
     trust_status_payload,
 )
-from app.flow.delivery import DeliveryOutcome, DeliveryUncertain
+from app.flow.delivery import (
+    DeliveryOutcome,
+    DeliveryUncertain,
+    DispatchFailed,
+    ProviderDispatchOutcome,
+    classify_provider_dispatch,
+    classify_send_exception,
+)
 from app.flow.coordinator import (
     CoordinatorError,
     FlowJob,
@@ -1276,7 +1283,16 @@ class FlowBridge:
     async def dispatch(
         self, command: str, payload: dict[str, Any], *, job_id: str = ""
     ) -> dict[str, Any]:
-        """Send one allowlisted command and return its structured result."""
+        """Send one allowlisted command and return its structured result.
+
+        Phase 3C.2.3.3: a failure here is reported with **both** states, because they
+        are different events. `CommandDenied` and `NotPaired` are raised before any
+        socket operation (transport definitively not sent, provider not dispatched);
+        an exception from the socket send or from waiting for the answer is
+        :class:`DispatchFailed`, which carries the transport outcome and leaves the
+        provider state ``UNKNOWN`` unless a correlated answer established something.
+        """
+        # Pre-send: provable non-delivery.
         proto.ensure_allowed(command)
         if not self.paired:
             raise NotPaired()
@@ -1288,11 +1304,50 @@ class FlowBridge:
             issued_at=proto.iso(),
             expires_at=proto.iso(),
         )
-        await self.send_command(envelope)
-        result = await self.await_result(envelope.id, self.config.command_timeout)
+
+        try:
+            await self.send_command(envelope)
+        except (NotPaired, proto.CommandDenied):
+            raise
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - DeliveryUncertain and anything else
+            # Honour a transport that can *prove* it never wrote the frame; anything
+            # else stays ambiguous, which is what `classify_send_exception` defaults to.
+            raise DispatchFailed(
+                "The command could not be confirmed as sent to the extension.",
+                code=getattr(exc, "code", "flow_command_failed"),
+                delivery=classify_send_exception(exc),
+                provider=ProviderDispatchOutcome.UNKNOWN,
+                details={"reason": type(exc).__name__},
+            ) from exc
+
+        try:
+            result = await self.await_result(envelope.id, self.config.command_timeout)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - timeout, dropped socket, decode error
+            # The frame reached the extension; whether the provider saw a generation
+            # is unknown. This must never be reported as `dispatched: false`.
+            raise DispatchFailed(
+                "The command was delivered to the extension but no answer arrived; "
+                "whether a generation was submitted is unknown.",
+                code="flow_command_timeout",
+                delivery=DeliveryOutcome.SENT,
+                provider=ProviderDispatchOutcome.UNKNOWN,
+                details={"reason": type(exc).__name__},
+            ) from exc
+
         if not result.ok:
             descriptor = proto.normalise_error(result.error)
-            raise CoordinatorError(descriptor.message, details={"code": descriptor.code.value})
+            raw_error = result.error if isinstance(result.error, dict) else {}
+            raise DispatchFailed(
+                descriptor.message,
+                code=descriptor.code.value,
+                delivery=DeliveryOutcome.SENT,
+                provider=classify_provider_dispatch(raw_error.get("dispatched")),
+                details=dict(descriptor.details),
+            )
         return dict(result.result)
 
     async def send_command(self, envelope: proto.CommandEnvelope) -> DeliveryOutcome:
@@ -1318,6 +1373,16 @@ class FlowBridge:
         self.stats["commands_sent"] += 1
         try:
             await session.websocket.send(frame)
+        except asyncio.CancelledError:
+            # Phase 3C.2.3.3: a cancellation inside the socket operation is NOT a
+            # delivery result. Clean up the record this send created (exactly once,
+            # and only if it is still ours) and re-raise so cancellation semantics
+            # are preserved. The coordinator classifies the attempt as ambiguous.
+            if session.pending.get(envelope.id) is future:
+                session.pending.pop(envelope.id, None)
+            if not future.done():
+                future.cancel()
+            raise
         except Exception as exc:
             # The pending future is removed because no answer can arrive for a frame
             # whose send raised — but that is a *cleanup*, not a claim that nothing

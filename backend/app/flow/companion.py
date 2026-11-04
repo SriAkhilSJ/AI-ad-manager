@@ -34,6 +34,12 @@ from typing import Any
 import httpx
 
 from app.flow import protocol as proto
+from app.flow.delivery import (
+    DeliveryOutcome,
+    DispatchFailed,
+    ProviderDispatchOutcome,
+    classify_send_exception,
+)
 from app.flow.bridge import BridgeConfig, FlowBridge
 from app.flow.security import install_redaction
 
@@ -251,10 +257,20 @@ class LocalFlowCompanion:
             proto.ensure_allowed(name)
         except proto.CommandDenied as exc:
             self.status.commands_refused += 1
-            await self._post_result(command_id, ok=False, job_id=job_id, error={
-                "code": proto.CommandDenied.code,
-                "message": exc.message,
-            })
+            await self._post_result(
+                command_id,
+                ok=False,
+                job_id=job_id,
+                error={
+                    "code": proto.CommandDenied.code,
+                    "message": exc.message,
+                    "dispatched": False,
+                    "transport": DeliveryOutcome.DEFINITELY_NOT_SENT.value,
+                    "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
+                },
+                transport=DeliveryOutcome.DEFINITELY_NOT_SENT,
+                provider=ProviderDispatchOutcome.NOT_DISPATCHED,
+            )
             return
 
         if name in GENERATION_COMMANDS and not self.config.allow_generation_commands:
@@ -268,29 +284,71 @@ class LocalFlowCompanion:
                 error={
                     "code": "flow_live_generation_disabled",
                     "message": "The companion does not execute generation commands in Phase 3C.1.",
+                    # Explicit, and true here: the command never reached the socket.
                     "dispatched": False,
+                    "transport": DeliveryOutcome.DEFINITELY_NOT_SENT.value,
+                    "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
                 },
+                transport=DeliveryOutcome.DEFINITELY_NOT_SENT,
+                provider=ProviderDispatchOutcome.NOT_DISPATCHED,
             )
             return
 
         if self.bridge is None:
-            await self._post_result(command_id, ok=False, job_id=job_id, error={
-                "code": "flow_bridge_unavailable",
-                "message": "The local bridge is not running.",
-                "dispatched": False,
-            })
+            await self._post_result(
+                command_id,
+                ok=False,
+                job_id=job_id,
+                error={
+                    "code": "flow_bridge_unavailable",
+                    "message": "The local bridge is not running.",
+                    "dispatched": False,
+                    "transport": DeliveryOutcome.DEFINITELY_NOT_SENT.value,
+                    "provider_dispatch": ProviderDispatchOutcome.NOT_DISPATCHED.value,
+                },
+                transport=DeliveryOutcome.DEFINITELY_NOT_SENT,
+                provider=ProviderDispatchOutcome.NOT_DISPATCHED,
+            )
             return
 
         self.status.paired = self.bridge.paired
         try:
             result = await self.bridge.dispatch(name, payload, job_id=job_id)
+        except asyncio.CancelledError:
+            # No result is posted: the request is being torn down. Silence is honest
+            # here — the backend treats the job as unknown, never as non-delivery.
+            raise
         except Exception as exc:  # noqa: BLE001 - normalised before it crosses the wire
+            # Phase 3C.2.3.3: `dispatched: false` is only truthful when the transport
+            # itself proved the frame never left. An exception after the socket send
+            # (timeout, reset, decode error) leaves the provider state unknown, and
+            # saying otherwise would invite a duplicate paid generation.
             code = getattr(exc, "code", "flow_command_failed")
-            await self._post_result(command_id, ok=False, job_id=job_id, error={
+            delivery = classify_send_exception(exc)
+            if isinstance(exc, DispatchFailed):
+                # The bridge correlated this answer with the command it sent, so the
+                # pair it reports is evidence, not speculation.
+                provider = exc.provider
+            elif delivery is DeliveryOutcome.DEFINITELY_NOT_SENT:
+                provider = ProviderDispatchOutcome.NOT_DISPATCHED
+            else:
+                provider = ProviderDispatchOutcome.UNKNOWN
+            error: dict[str, Any] = {
                 "code": str(code),
                 "message": getattr(exc, "message", "The bridge could not complete the command."),
-                "dispatched": False,
-            })
+                "transport": delivery.value,
+                "provider_dispatch": provider.value,
+            }
+            if delivery is DeliveryOutcome.DEFINITELY_NOT_SENT:
+                error["dispatched"] = False
+            await self._post_result(
+                command_id,
+                ok=False,
+                job_id=job_id,
+                error=error,
+                transport=delivery,
+                provider=provider,
+            )
             self.status.commands_refused += 1
             return
 
@@ -305,17 +363,23 @@ class LocalFlowCompanion:
         job_id: str,
         result: dict[str, Any] | None = None,
         error: dict[str, Any] | None = None,
+        transport: DeliveryOutcome | None = None,
+        provider: ProviderDispatchOutcome | None = None,
     ) -> None:
-        await self._post(
-            "/api/v1/flow/companion/results",
-            {
-                "command_id": command_id,
-                "job_id": job_id,
-                "ok": ok,
-                "result": result or {},
-                "error": error,
-            },
-        )
+        payload: dict[str, Any] = {
+            "command_id": command_id,
+            "job_id": job_id,
+            "ok": ok,
+            "result": result or {},
+            "error": error,
+        }
+        # Phase 3C.2.3.3: the two events travel separately. Omitted means "not
+        # stated", which the backend records as unknown — never as non-delivery.
+        if transport is not None:
+            payload["transport"] = transport.value
+        if provider is not None:
+            payload["provider_dispatch"] = provider.value
+        await self._post("/api/v1/flow/companion/results", payload)
 
     # ------------------------------------------------------------------ loop
     async def run_forever(self, *, max_iterations: int | None = None) -> None:

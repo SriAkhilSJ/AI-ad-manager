@@ -558,7 +558,13 @@ class ScriptedTransport(CommandTransport):
         self._pending[envelope.id] = future
 
     async def await_result(self, command_id: str, timeout: float) -> Any:
-        return await asyncio.wait_for(self._pending[command_id], timeout)
+        result = await asyncio.wait_for(self._pending[command_id], timeout)
+        # Phase 3C.2.3.3: a real extension echoes the command id it answers. The
+        # canned fixtures here use placeholders, so stamp the real id — a *foreign*
+        # id is exercised explicitly by the cancellation/delivery tests.
+        if getattr(result, "id", command_id) != command_id:
+            result = result.model_copy(update={"id": command_id})
+        return result
 
 
 def _request(prompt: str = "A charcoal frame with a terminal glow") -> GenerationCommand:

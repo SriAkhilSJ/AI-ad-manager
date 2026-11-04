@@ -89,6 +89,15 @@ such an attempt can pay for the same generation twice.
 | `MAY_HAVE_BEEN_SENT` | the send was entered; delivery is unknown | **retained** (settled as spend) | `UNKNOWN_SUBMISSION` | no |
 | `SENT` | the send completed | retained until the result | `DISPATCHED` → … | n/a |
 
+> **Corrected in Phase 3C.2.3.3.** The table above classifies **transport** delivery
+> only. This milestone's first cut also let a *provider* answer (`error.dispatched:
+> false`) set `DEFINITELY_NOT_SENT`; that was wrong, because the frame had in fact been
+> delivered to the extension. Provider dispatch is now its own field
+> (`FlowJob.provider_dispatch`), a delivered frame stays `SENT` forever, and a provider
+> refusal is recorded as `SENT` + `NOT_DISPATCHED` — still retryable, but without
+> rewriting the transport history. See
+> `docs/20-PHASE3C233-CANCELLATION-DELIVERY-SEMANTICS.md` §2.
+
 * `classify_send_exception()` reads a typed `DeliveryFailure`
   (`DefiniteNonDelivery` / `DeliveryUncertain`) first, then a declared `delivery` attribute, and
   otherwise returns **`MAY_HAVE_BEEN_SENT`**. A bare `ConnectionError`, `OSError` or
@@ -100,9 +109,10 @@ such an attempt can pay for the same generation twice.
   `DeliveryUncertain`; the pending future is removed and cancelled as *cleanup*, not as a claim
   that nothing was sent.
 * `FlowJob.delivery` records the classification and is exposed in `job.as_dict()`.
-  `FlowJob.dispatched` now means "may have reached the provider": it is `False` **only** for
-  proven non-delivery, never merely because a send raised. Nothing can read `dispatched == False`
-  and conclude a frame stayed home when that is unknown.
+  `FlowJob.dispatched` means "may have reached the extension": it is `False` **only** for
+  proven non-delivery, never merely because a send raised and (Phase 3C.2.3.3) never because the
+  provider reported that no generation was submitted. Nothing can read `dispatched == False` and
+  conclude a frame stayed home when that is unknown.
 * Initial submissions and retries share `_deliver()` and therefore identical semantics.
 
 Pending-future cleanup: on a raised send the future for that command id is removed from

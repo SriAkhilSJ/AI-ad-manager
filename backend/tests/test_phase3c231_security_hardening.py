@@ -473,7 +473,13 @@ async def test_a_provider_reported_non_dispatch_releases_the_reservation():
 
     coordinator = _coordinator(NotDispatched(), ledger)
     job = await coordinator.submit("image", _request("x"), approval_binding="a" * 64)
-    assert job.dispatched is False
+    # Phase 3C.2.3.3 correction: this test used to assert `dispatched is False` here,
+    # which conflated two events. The frame WAS delivered (transport SENT); what the
+    # provider answer establishes is that no generation was submitted. The budget is
+    # still released, because nothing was billable.
+    assert job.delivery.value == "sent"
+    assert job.provider_dispatch.value == "not_dispatched"
+    assert job.dispatched is True, "the command reached the extension"
     assert ledger.spent_usd == 0.0
     assert ledger.reservations == 0
 

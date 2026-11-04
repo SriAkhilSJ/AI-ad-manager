@@ -38,6 +38,7 @@ from app.flow.delivery import (
     DefiniteNonDelivery,
     DeliveryOutcome,
     DeliveryUncertain,
+    ProviderDispatchOutcome,
     classify_send_exception,
     classify_send_result,
 )
@@ -106,7 +107,11 @@ class RecordingTransport(CommandTransport):
         return DeliveryOutcome.SENT
 
     async def await_result(self, command_id: str, timeout: float) -> Any:
-        return await asyncio.wait_for(self._pending[command_id], timeout=timeout)
+        result = await asyncio.wait_for(self._pending[command_id], timeout=timeout)
+        # Phase 3C.2.3.3: an extension echoes the command id it answers.
+        if getattr(result, "id", command_id) != command_id:
+            result = result.model_copy(update={"id": command_id})
+        return result
 
 
 def _ok(media_id: str = "media-0001"):
@@ -162,10 +167,17 @@ def _coordinator(transport: CommandTransport, ledger: Any = None, **kwargs: Any)
 
 
 async def _failed_not_dispatched(coordinator, *, prompt: str = "retry me"):
-    """A job in FAILED with *proven* non-delivery, ready to be retried."""
+    """A FAILED job the provider authoritatively never submitted.
+
+    Phase 3C.2.3.3 splits the two events: the frame *was* delivered (``SENT``) and the
+    provider was told nothing (``NOT_DISPATCHED``), which is a retryable pair. The
+    transport-only case is asserted in the cancellation/delivery module.
+    """
     job = await coordinator.submit("image", _request(prompt), approval_binding="a" * 64)
     assert job.state.value == "failed", job.state
-    assert job.delivery is DeliveryOutcome.DEFINITELY_NOT_SENT
+    assert job.delivery is DeliveryOutcome.SENT
+    assert job.provider_dispatch is ProviderDispatchOutcome.NOT_DISPATCHED
+    assert job.dispatched is True, "the frame was delivered to the extension"
     return job
 
 
@@ -342,7 +354,8 @@ async def test_repeated_retries_cannot_bypass_the_cap():
     coordinator = _coordinator(transport, ledger, max_live_jobs=4)
 
     job = await coordinator.submit("image", _request("free"), approval_binding="a" * 64)
-    assert job.state.value == "failed" and job.delivery is DeliveryOutcome.DEFINITELY_NOT_SENT
+    assert job.state.value == "failed"
+    assert job.provider_dispatch is ProviderDispatchOutcome.NOT_DISPATCHED
 
     charged = await coordinator.submit("image", _request("paid"), approval_binding="a" * 64)
     assert charged.state.value == "submitted"

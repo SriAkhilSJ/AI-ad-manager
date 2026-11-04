@@ -131,6 +131,7 @@ def build_report() -> dict:
                 "implemented_capabilities": implemented,
                 "not_implemented": unusable,
                 "mock_tested": "yes (httpx.MockTransport suites)",
+                "credential_configured": "no" if missing else "yes",
                 "sandbox_verified": "no",
                 "production_verified": "no",
                 "blockers": [
@@ -155,6 +156,7 @@ def build_report() -> dict:
                 "implemented": "yes" if row["implemented"] else "no",
                 "configured": "yes" if row["available"] else "no",
                 "mock_tested": "yes (httpx.MockTransport suites)",
+                "credential_configured": "no" if missing else "yes",
                 "sandbox_verified": "no",
                 "production_verified": "no",
                 "missing": missing,
@@ -165,14 +167,52 @@ def build_report() -> dict:
     from app.creative.providers import creative_provider_status
 
     creative = creative_provider_status(settings)
+    creative_rows = []
+    for name, label, envs in (
+        ("openai_image", "OpenAI Images", ["OPENAI_API_KEY"]),
+        ("replicate_video", "Replicate video", ["REPLICATE_API_TOKEN", "REPLICATE_VIDEO_MODEL"]),
+    ):
+        missing = [n for n in envs if not _present(n)]
+        price = _present("CREATIVE_PRICING_JSON")
+        budget = float(os.environ.get("CREATIVE_CAMPAIGN_BUDGET_USD", "0") or 0)
+        creative_rows.append(
+            {
+                "provider": name,
+                "label": label,
+                "implemented": "yes",
+                "mock_tested": "yes (httpx.MockTransport suites)",
+                "credential_configured": "no" if missing else "yes",
+                "sandbox_verified": "no",
+                "production_verified": "no",
+                "blocked": (
+                    ", ".join(
+                        ([] if not missing else [f"missing {', '.join(missing)}"])
+                        + ([] if price else ["price not pinned in CREATIVE_PRICING_JSON"])
+                        + ([] if budget > 0 else ["CREATIVE_CAMPAIGN_BUDGET_USD is 0"])
+                        + (
+                            []
+                            if os.environ.get("CREATIVE_ALLOW_PAID_GENERATION", "").lower() == "true"
+                            else ["CREATIVE_ALLOW_PAID_GENERATION is not true"]
+                        )
+                    )
+                    or "nothing — configured and authorised"
+                ),
+            }
+        )
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "environment": getattr(settings, "environment", "unknown"),
         "publishing_enabled": publish_enabled,
         "token_vault": {"backend": vault, "key_present": vault_key},
+        "oauth": {
+            "redirect": str(getattr(settings, "oauth_redirect_base_url", "") or ""),
+            "vault": vault,
+            "key_present": vault_key,
+        },
         "platforms": rows,
         "ads": ads,
         "creative": creative,
+        "creative_rows": creative_rows,
         "flow": "disabled — source, signed release and installed artifact remain unverifiable",
     }
 
@@ -187,33 +227,56 @@ def render_markdown(report: dict) -> str:
     add("")
     add("**How to read the columns.** `implemented` is what the code does. "
         "`mock-tested` means an automated suite exercises it against "
-        "`httpx.MockTransport`. `sandbox-verified` and `production-verified` can "
-        "only be filled by a real call against a real developer account — this "
-        "repository has not made one, so both are `no` for every row. A feature is "
-        "not production-ready because its code exists.")
+        "`httpx.MockTransport`. `credential-configured` is only about presence: the "
+        "environment variables exist *and* the OAuth prerequisites below are met; it "
+        "is not evidence that a provider accepted them. `sandbox-verified` and "
+        "`production-verified` can only be filled by a real call against a real "
+        "developer account, so both are `no` for every row until one is recorded in "
+        "`docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because "
+        "its code exists.")
+    add("")
+    add("## OAuth prerequisites")
+    add("")
+    add(f"- `OAUTH_REDIRECT_BASE_URL`: {report['oauth']['redirect'] or 'NOT SET — no consent flow can complete'}")
+    add(f"- Token vault: backend `{report['oauth']['vault']}`, key "
+        f"{'present' if report['oauth']['key_present'] else 'MISSING'}")
+    add(f"- `PUBLISHING_ENABLED`: {report['publishing_enabled']}")
+    add("")
+    add("Every provider also requires its own OAuth app review, and the redirect above")
+    add("must be registered in that app. Sharing one app's credentials across providers")
+    add("is not supported anywhere in this codebase.")
     add("")
     add("## Six platforms")
     add("")
-    add("| Platform | Implemented | Mock-tested | Sandbox-verified | Production-verified |")
-    add("| --- | --- | --- | --- | --- |")
+    add("| Platform | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified |")
+    add("| --- | --- | --- | --- | --- | --- |")
     for row in report["platforms"]:
         add(
             f"| {row['label']} | {row['implemented']} | {row['mock_tested']} | "
-            f"{row['sandbox_verified']} | {row['production_verified']} |"
+            f"{row['credential_configured']} | {row['sandbox_verified']} | {row['production_verified']} |"
         )
     add("")
     add("## Paid media")
     add("")
-    add("| Platform | API | Implemented | Credentials present | Mock-tested | Sandbox-verified | Production-verified |")
-    add("| --- | --- | --- | --- | --- | --- | --- |")
+    add("| Platform | API | Implemented | Credential-configured | Sandbox-verified | Production-verified |")
+    add("| --- | --- | --- | --- | --- | --- |")
     for row in report["ads"]:
         add(
             f"| {row['label']} | {row['api_version']} | {row['implemented']} | "
-            f"{row['configured']} | {row['mock_tested']} | {row['sandbox_verified']} | "
+            f"{row['credential_configured']} | {row['sandbox_verified']} | "
             f"{row['production_verified']} |"
         )
     add("")
     add("## Creative generation")
+    add("")
+    add("| Provider | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified | Blocked by |")
+    add("| --- | --- | --- | --- | --- | --- | --- |")
+    for row in report["creative_rows"]:
+        add(
+            f"| {row['label']} | {row['implemented']} | {row['mock_tested']} | "
+            f"{row['credential_configured']} | {row['sandbox_verified']} | "
+            f"{row['production_verified']} | {row['blocked']} |"
+        )
     add("")
     creative = report["creative"]
     add(f"- Provider set: `{creative.get('provider')}`")

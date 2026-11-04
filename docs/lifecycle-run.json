@@ -1,0 +1,3532 @@
+{
+  "generated_at": "2026-11-04T15:39:43+00:00",
+  "base_url": "http://127.0.0.1:8000",
+  "steps": [
+    {
+      "step": "health",
+      "status": 200,
+      "payload": {
+        "status": "ok",
+        "uptime_seconds": 4510.8
+      }
+    },
+    {
+      "step": "login",
+      "status": 200,
+      "payload": {
+        "token": "<redacted>"
+      }
+    },
+    {
+      "step": "system_status",
+      "status": 200,
+      "payload": {
+        "app": {
+          "name": "Crusor AI Marketing Director",
+          "environment": "development",
+          "version": "1.1.0-phase2",
+          "api_prefix": "/api/v1",
+          "uptime_seconds": 4511.1,
+          "bootstrap_required": false
+        },
+        "database": {
+          "dialect": "sqlite",
+          "status": "available",
+          "error": null,
+          "pgvector": "json-fallback",
+          "vector_search": "python-cosine"
+        },
+        "llm": {
+          "status": "available",
+          "providers": {
+            "openai": {
+              "configured": false
+            },
+            "anthropic": {
+              "configured": false
+            },
+            "openrouter": {
+              "name": "openrouter",
+              "base_url": "https://openrouter.ai/api/v1",
+              "credential_present": false,
+              "default_model": "openai/gpt-4o-mini",
+              "timeout_seconds": 60,
+              "max_attempts": 2
+            },
+            "velona": {
+              "name": "velona",
+              "base_url": "https://unconfigured.invalid/v1",
+              "credential_present": false,
+              "default_model": "deepseek-v4.1-flash",
+              "timeout_seconds": 60,
+              "max_attempts": 2,
+              "base_url_supplied": false
+            },
+            "mock": {
+              "configured": true
+            }
+          },
+          "routing": {
+            "default": {
+              "provider": null,
+              "model": null
+            },
+            "tiers": {
+              "primary": {
+                "provider": "velona",
+                "model": "deepseek-v4.1-flash",
+                "input_per_1k_usd": 0.004,
+                "output_per_1k_usd": 0.016,
+                "price_verified": false
+              },
+              "auxiliary": {
+                "provider": "velona",
+                "model": "qwen-3.7-flash",
+                "input_per_1k_usd": 0.004,
+                "output_per_1k_usd": 0.016,
+                "price_verified": false
+              },
+              "cheap_task_classes": [
+                "classification",
+                "deduplication",
+                "extraction",
+                "formatting",
+                "summarisation",
+                "summarization",
+                "tagging"
+              ],
+              "reasoning_task_classes": [
+                "brand_consistency",
+                "competitor_analysis",
+                "evaluation",
+                "positioning",
+                "research_synthesis",
+                "strategic_decision",
+                "strategy"
+              ],
+              "default_strategy_budget_usd": 0.06,
+              "default_research_budget_usd": 0.12,
+              "note": "Model ids and prices are configuration. Unverified prices use a conservative placeholder so a budget check fails before money is spent."
+            },
+            "task_routing": {},
+            "routing": {},
+            "unverified_models": [
+              "deepseek-v4.1-flash",
+              "qwen-3.7-flash"
+            ],
+            "configured": true
+          },
+          "monthly_budget_usd": 100.0,
+          "note": null
+        },
+        "tasks": {
+          "driver": "inline",
+          "available": true,
+          "status": "available",
+          "broker_configured": false,
+          "requested": "inline",
+          "note": "In-process execution. Suitable for development; no persistence across restarts."
+        },
+        "storage": {
+          "backend": "local",
+          "status": "degraded",
+          "available": true,
+          "configured": false,
+          "root": "/home/user/AI-ad-manager/backend/.data/storage",
+          "writable": true,
+          "note": "Development filesystem storage: real writes, but not shared across replicas and not durable. Configure S3_BUCKET before production."
+        },
+        "research": {
+          "provider": "deterministic",
+          "status": "degraded",
+          "available": true,
+          "network": false,
+          "max_sources": 25,
+          "note": "Offline provider: findings are derived from stored brand knowledge and open gaps are labelled rather than invented. Configure RESEARCH_HTTP_ENDPOINT for live market research."
+        },
+        "strategy": {
+          "status": "available",
+          "budget_usd": 0.06,
+          "budget_inr_equivalent": 4.98,
+          "max_iterations": 4,
+          "models": {
+            "reasoning": "deepseek-v4.1-flash",
+            "auxiliary": "qwen-3.7-flash"
+          },
+          "price_verified": false,
+          "unverified_models": [
+            "deepseek-v4.1-flash",
+            "qwen-3.7-flash"
+          ],
+          "note": "Strategy generation is available and produces founder-approvable drafts. Nothing is published, sent, spent or applied to a live account."
+        },
+        "creative": {
+          "flow_connector": {
+            "integration": "google_flow_connector",
+            "status": "not_available",
+            "available": false,
+            "enabled": false,
+            "source_found": false,
+            "required_information": [
+              "The Flow Connector source: manifest.json (manifest_version, permissions, host_permissions, externally_connectable).",
+              "The background service worker's message contract: message types, request and response payloads, and the extension id used for onMessageExternal.",
+              "How an extension-initiated generation is authorised (session token, native messaging host, or user-visible confirmation).",
+              "Where generated files land: a download URL, a local path, or an object store the backend can read.",
+              "Job lifecycle semantics: accepted / queued / running / failed states, timeouts, cancellation support and rate limits.",
+              "Terms-of-service confirmation that programmatic generation via the extension is permitted for this account."
+            ],
+            "note": "The Flow Connector source is absent from this repository, so its protocol is unknown and no adapter is active."
+          },
+          "provider": "mock",
+          "status": "available",
+          "available": true,
+          "is_mock": true,
+          "billable": false,
+          "paid_generation_enabled": false,
+          "live_generation_enabled": false,
+          "video_playback": "poster_only",
+          "note": "Creative Studio produces briefs, mock generation jobs and stored assets. Mock assets are synthetic frames, not model-generated artwork. Automated QA never claims visual verification; a human must review every asset.",
+          "allow_paid_generation": false,
+          "campaign_budget_usd": 0.0,
+          "pricing_configured": false,
+          "job_timeout_seconds": 300,
+          "max_upload_bytes": 26214400,
+          "publishing_available": false,
+          "external_scheduling": false
+        },
+        "flow": {
+          "integration": "google_flow_connector",
+          "phase": "3C.2.3",
+          "available": false,
+          "enabled": false,
+          "live_generation_enabled": false,
+          "provider": "flow",
+          "bridge": {
+            "mode": "local_companion",
+            "bind_host": "127.0.0.1",
+            "loopback_only": true,
+            "http_port": 8793,
+            "ws_port": 8794,
+            "enabled": false,
+            "authenticated": true,
+            "command_allowlist": [
+              "status",
+              "generate_image",
+              "generate_video",
+              "check_video_status",
+              "export_asset"
+            ],
+            "denied_commands": [
+              "api_post",
+              "autonomous_storyboard_pipeline",
+              "batch_generate",
+              "cancel_job",
+              "download_media",
+              "eval_script",
+              "get_flow_context",
+              "get_token",
+              "native_click",
+              "native_key",
+              "open_new_project",
+              "rapid_batch_dispatch",
+              "rename_project",
+              "upload_asset"
+            ]
+          },
+          "token_policy": {
+            "page_visible_tokens": false,
+            "arbitrary_api_urls": false,
+            "approved_endpoints_only": true,
+            "logging": "redacted"
+          },
+          "generation": {
+            "max_live_jobs": 1,
+            "one_attempt_per_request": true,
+            "unknown_submission_policy": "never_resubmitted_automatically",
+            "output_count": 1
+          },
+          "asset_export": {
+            "contract": "one_time_ticket_then_verified_bytes",
+            "ttl_seconds": 900,
+            "max_bytes": 26214400,
+            "checksum_verified": true,
+            "readback_verified": true,
+            "assets_created_before_verification": false,
+            "chunked": {
+              "enabled": true,
+              "chunk_bytes": 8388608,
+              "max_chunks": 4096,
+              "chunk_checksum": "sha256",
+              "ordering": "strict"
+            }
+          },
+          "companion": {
+            "configured": false,
+            "sessions": []
+          },
+          "source_gate": {
+            "status": "SOURCE_ABSENT",
+            "package_path": "",
+            "source_present": false,
+            "package_digest_algorithm": "sha256-tree-v1",
+            "package_digest": "",
+            "license_files": [],
+            "authorization_files": [],
+            "license_evidence": [],
+            "substantive_license_evidence": [],
+            "missing_files": [],
+            "authorized_to_modify": false,
+            "can_vendor_source": false,
+            "upstream_remediation_allowed": false,
+            "scan_permitted": false,
+            "evidence_alone_authorizes": false,
+            "human_review_required": true,
+            "attestation": {
+              "present": false,
+              "path": "",
+              "schema": "",
+              "valid": false,
+              "bound_to_package": false,
+              "authorized": false,
+              "upstream_project_url": "",
+              "release_tag": "",
+              "release_commit": "",
+              "package_sha256": "",
+              "observed_package_sha256": "",
+              "licence_name": "",
+              "evidence_reference": "",
+              "evidence_sha256": "",
+              "modification_permitted": false,
+              "redistribution_permitted": false,
+              "reviewer": "",
+              "reviewed_at": "",
+              "review_reference": "",
+              "problems": []
+            },
+            "reason": "No upstream package is configured or present. The DeepX Flow Connector source archive is not supplied to this environment, so U1-U7 cannot be implemented here and no source may be copied into this repository.",
+            "required_files": [
+              "manifest.json",
+              "service-worker.js",
+              "content-script-main.js",
+              "content-script-isolated.js",
+              "mcp-server/src/server.js",
+              "mcp-server/src/ws-bridge.js",
+              "mcp-server/package.json"
+            ],
+            "license_evidence_searched": [
+              "LICENSE",
+              "LICENSE.md",
+              "LICENSE.txt",
+              "COPYING",
+              "AUTHORIZATION.md",
+              "PERMISSION.md"
+            ],
+            "authorization_requirements": [
+              "an attestation stored outside the package",
+              "upstream project URL and exact release tag or commit",
+              "the package tree digest the reviewer reviewed",
+              "the licence name, evidence file and that file's SHA-256",
+              "explicit modification and redistribution permission",
+              "reviewer identity, review timestamp and evidence reference"
+            ],
+            "remediation_requirements": [
+              {
+                "blocker": "U1",
+                "file": "content-script-main.js",
+                "requirement": "Remove the wildcard token broadcast and the page-accessible get_token / get_flow_context handlers; keep bearer material inside the extension's isolated world."
+              },
+              {
+                "blocker": "U2",
+                "file": "content-script-main.js",
+                "requirement": "Replace api_post(url, body, token) with fixed allowlisted Flow endpoints; validate method, schema and destination before attaching authorization; reject encoded, redirected and alternate origins."
+              },
+              {
+                "blocker": "U3",
+                "file": "mcp-server/src/ws-bridge.js + service-worker.js",
+                "requirement": "Speak flow.bridge.v1 to the companion instead of running a second unauthenticated bridge on 8792: authenticated HELLO, Host/Origin checks, size and timeout limits, no CORS."
+              },
+              {
+                "blocker": "U4",
+                "file": "mcp-server/src/server.js + service-worker.js",
+                "requirement": "Ship a restricted tool surface (status, generate_image, generate_video, check_video_status, export_asset) and remove eval_script, native_*, batch/rapid/autonomous tooling."
+              },
+              {
+                "blocker": "U5",
+                "file": "manifest.json",
+                "requirement": "Replace http://*/* and https://*/* with the Flow/Labs origins actually used, and justify each remaining permission."
+              },
+              {
+                "blocker": "U6",
+                "file": "service-worker.js",
+                "requirement": "Remove the post-submit retry; create one request id before dispatch, report UNKNOWN_SUBMISSION on a lost response, and never resubmit."
+              },
+              {
+                "blocker": "U7",
+                "file": "service-worker.js",
+                "requirement": "Implement export_asset: return media bytes (bounded chunks) for a correlated job instead of a Chrome download id."
+              }
+            ]
+          },
+          "trust": {
+            "state": "UNVERIFIED",
+            "trusted": false,
+            "states_supported": [
+              "SOURCE_ABSENT",
+              "RELEASE_ANCHOR_MISSING",
+              "INSTALLED_ARTIFACT_NOT_FOUND",
+              "ARTIFACT_MEASUREMENT_FAILED",
+              "ARTIFACT_DIGEST_MISMATCH",
+              "MEASUREMENT_STALE",
+              "COMPONENT_UNVERIFIED",
+              "UNVERIFIED",
+              "VERIFIED"
+            ],
+            "reasons": [
+              "no_measurement"
+            ],
+            "source_gate": "SOURCE_ABSENT",
+            "anchor": {
+              "type": "none",
+              "present": false,
+              "schema": "",
+              "product": "",
+              "signature_verified": false,
+              "identifies_components": false,
+              "live_capable": false,
+              "digest_algorithm": "",
+              "released_at": ""
+            },
+            "expected": {
+              "extension_id": "",
+              "version": "",
+              "source_commit": "",
+              "build_id": "",
+              "protocol": "",
+              "artifact_digest": ""
+            },
+            "measured": {
+              "extension_id": "",
+              "version": "",
+              "artifact_digest": "",
+              "measurement_id": "",
+              "measured_at": 0.0,
+              "age_seconds": 0.0,
+              "fresh": false,
+              "fresh_at_record_time": false,
+              "expires_at": 0.0,
+              "expires_in_seconds": 0.0,
+              "source": "none",
+              "digest_algorithm": ""
+            },
+            "challenge": {
+              "issued": false,
+              "valid": false,
+              "expires_in_seconds": 0.0
+            },
+            "components": {
+              "chrome_extension": {
+                "label": "Chrome extension",
+                "state": "NOT_MEASURED",
+                "required": true,
+                "expected_digest": ""
+              },
+              "mcp_server": {
+                "label": "MCP server",
+                "state": "NOT_MEASURED",
+                "required": false,
+                "expected_digest": ""
+              },
+              "local_companion": {
+                "label": "Local companion",
+                "state": "NOT_MEASURED",
+                "required": false,
+                "expected_digest": ""
+              }
+            },
+            "unverified_components": [
+              "chrome_extension",
+              "mcp_server",
+              "local_companion"
+            ],
+            "evidence": {
+              "supported_protocol": false,
+              "claims_well_formed": false,
+              "components_consistent": false,
+              "release_anchor_valid": false,
+              "hello_digest_claim_matches_anchor": false,
+              "installed_artifact_measured": false,
+              "installed_artifact_digest_matches_anchor": false,
+              "runtime_identity_correlated": false,
+              "measurement_fresh": false,
+              "measurement_trust_state": "UNVERIFIED",
+              "component_states": {},
+              "required_components": [
+                "chrome_extension"
+              ],
+              "failures": [
+                "no_measurement"
+              ],
+              "measurement_id": "",
+              "measured_at": 0.0,
+              "measurement_expires_at": 0.0,
+              "measurement_source": "none",
+              "digest_algorithm": ""
+            },
+            "recent_events": [],
+            "limitations": [
+              "A measurement proves what is on disk, not what the browser has loaded.",
+              "A challenge binds a report to a session; it cannot make a compromised machine honest."
+            ]
+          },
+          "measurement": {
+            "performed_by": "local_companion_process",
+            "extension_root_configured": false,
+            "extension_layout": "versioned",
+            "mcp_root_configured": false,
+            "mcp_layout": "tree",
+            "companion_root_configured": false,
+            "companion_layout": "tree",
+            "digest_algorithm": "sha256-tree-runtime-v1",
+            "freshness_seconds": 300.0,
+            "required": [
+              "chrome_extension"
+            ],
+            "peer_reported_measurement_accepted": false,
+            "budget_enforcement": "none",
+            "budget_cap_usd": 0.0
+          },
+          "protocol": {
+            "supported": [
+              "flow.bridge.v1"
+            ],
+            "trust_semantics": {
+              "claims_well_formed": "syntax only",
+              "components_consistent": "package agrees with itself",
+              "artifact_integrity_verified": "the HELLO's digest claim matches the release; a claim, never evidence about the installed files",
+              "installed_artifact_measured": "read from disk by the local companion process, never submitted by the extension",
+              "provenance_trusted": "session trust: measured locally, matched to a signed release, still inside its validity window",
+              "unverified_state": "UNVERIFIED"
+            },
+            "current": "flow.bridge.v1",
+            "requires_provenance": true,
+            "required_hello_fields": [
+              "extension_version",
+              "service_worker_version",
+              "mcp_version",
+              "source_commit",
+              "build_id"
+            ],
+            "allow_component_drift": false,
+            "trust_anchor": {
+              "anchor_configured": false,
+              "anchor_kind": "none",
+              "release_pinned": false,
+              "source_commit_pinned": false,
+              "manifest_public_key_configured": false,
+              "component_drift_allowed": false
+            },
+            "close_codes": {
+              "provenance": 4422,
+              "unsupported_protocol": 4426
+            }
+          },
+          "lifecycle": {
+            "states": [
+              "NOT_SUBMITTED",
+              "SUBMITTING",
+              "SUBMITTED",
+              "RUNNING",
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN_SUBMISSION",
+              "CANCELLED"
+            ],
+            "terminal": [
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN_SUBMISSION",
+              "CANCELLED"
+            ],
+            "auto_resubmit_after_unknown": false,
+            "duplicate_idempotency_key": "replay-if-identical-else-409"
+          },
+          "upstream_blockers": [
+            {
+              "id": "U1",
+              "area": "page-visible token channel",
+              "finding": "content-script-main.js posts DEEPX_AUTH_TOKEN_CAPTURED with window.postMessage(..., '*') and answers get_token / get_flow_context from any page script.",
+              "required_change": "Delete the token broadcast and the get_token / get_flow_context handlers; keep tokens inside the extension's isolated world.",
+              "blocked_because": "The extension source is not supplied and its licence is unconfirmed."
+            },
+            {
+              "id": "U2",
+              "area": "arbitrary authenticated POST",
+              "finding": "api_post(url, body, token) attaches the bearer token to a caller-supplied URL.",
+              "required_change": "Replace it with fixed, allowlisted Google Flow endpoints and return only non-secret results.",
+              "blocked_because": "Requires editing content-script-main.js inside the extension package."
+            },
+            {
+              "id": "U3",
+              "area": "pairing authentication",
+              "finding": "The service worker connects to ws://127.0.0.1:8792/ws and sends HELLO without any credential.",
+              "required_change": "Send pairing_id/pairing_secret in the HELLO frame and refuse to run unpaired; support the flow.bridge.v1 envelope.",
+              "blocked_because": "Unmodified extensions cannot authenticate, so they are refused."
+            },
+            {
+              "id": "U4",
+              "area": "generation commands",
+              "finding": "eval_script, batch_generate, rapid_batch_dispatch, autonomous_storyboard_pipeline, rename_project and open_new_project are registered MCP tools.",
+              "required_change": "Ship a restricted build, or gate the powerful tools behind a local developer flag that Crusor never sets.",
+              "blocked_because": "Tool registration lives in the third-party MCP server."
+            },
+            {
+              "id": "U5",
+              "area": "host permissions",
+              "finding": "manifest.json declares http://*/* and https://*/* host permissions.",
+              "required_change": "Reduce to the Flow/Labs hosts actually used and document each one.",
+              "blocked_because": "manifest.json is part of the third-party package."
+            },
+            {
+              "id": "U6",
+              "area": "ambiguous submit retry",
+              "finding": "fastFillAndSubmitPrompt re-modifies the prompt and retries once when it cannot observe that submission succeeded.",
+              "required_change": "After the submit action is dispatched, report UNKNOWN_SUBMISSION and stop; never resubmit automatically.",
+              "blocked_because": "The retry lives in service-worker.js."
+            },
+            {
+              "id": "U7",
+              "area": "asset delivery",
+              "finding": "deepx_download_media returns {downloadId, status} and never hands bytes to Crusor; generation returns URLs that a remote backend cannot fetch.",
+              "required_change": "Implement export_asset: return the media bytes (or stream them to a companion-issued one-time URL) for a correlated job.",
+              "blocked_because": "Requires a new command in the extension service worker."
+            }
+          ],
+          "note": "Phase 3C.1 hardens the bridge, the command surface, the token boundary and the asset-export contract. Live Flow generation stays disabled until the upstream extension changes are delivered and Phase 3C.2 is accepted."
+        },
+        "publishing": {
+          "status": "unavailable",
+          "mode": "human_approval_required",
+          "vault": "unavailable",
+          "vault_reason": "token vault is not configured (TOKEN_VAULT_BACKEND must be 'db' and TOKEN_VAULT_KEY must be set)",
+          "verified_before_publish": true,
+          "platforms": [
+            {
+              "platform": "instagram",
+              "credentials_configured": false,
+              "vault_available": false,
+              "transport_available": false,
+              "publish_enabled": false,
+              "capabilities": {
+                "text_post": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "Instagram requires at least one media asset"
+                },
+                "image_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "container + media_publish"
+                },
+                "video_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "Reels/IGTV container with video_url"
+                },
+                "scheduling": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "not implemented"
+                },
+                "analytics": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "media insights"
+                },
+                "paid_ads": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "Paid media is handled by app/integrations/ads.py (Meta/Google/LinkedIn transports implemented, unverified), not by the publishing adapter"
+                }
+              },
+              "reason": "instagram: application credentials are not configured."
+            },
+            {
+              "platform": "linkedin",
+              "credentials_configured": false,
+              "vault_available": false,
+              "transport_available": false,
+              "publish_enabled": false,
+              "capabilities": {
+                "text_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "UGC Posts, shareMediaCategory NONE"
+                },
+                "image_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "UGC Posts with IMAGE asset"
+                },
+                "video_post": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "videos API not implemented"
+                },
+                "scheduling": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "not implemented"
+                },
+                "analytics": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "socialActions + share statistics"
+                },
+                "paid_ads": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "LinkedIn Marketing API not implemented"
+                }
+              },
+              "reason": "linkedin: application credentials are not configured."
+            },
+            {
+              "platform": "youtube",
+              "credentials_configured": false,
+              "vault_available": false,
+              "transport_available": false,
+              "publish_enabled": false,
+              "capabilities": {
+                "text_post": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "YouTube has no text post surface"
+                },
+                "image_post": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "thumbnails are not posts"
+                },
+                "video_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "resumable upload"
+                },
+                "scheduling": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "status.publishAt on upload"
+                },
+                "analytics": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "statistics part; deeper analytics need the Reporting API"
+                },
+                "paid_ads": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "Google Ads API not implemented"
+                }
+              },
+              "reason": "youtube: application credentials are not configured."
+            },
+            {
+              "platform": "x",
+              "credentials_configured": false,
+              "vault_available": false,
+              "transport_available": false,
+              "publish_enabled": false,
+              "capabilities": {
+                "text_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "POST /2/tweets, 280 characters"
+                },
+                "image_post": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "media upload uses the v1.1 endpoint; not implemented"
+                },
+                "video_post": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "not implemented"
+                },
+                "scheduling": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "no native scheduling in the v2 API"
+                },
+                "analytics": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "public_metrics only; impressions are not public"
+                },
+                "paid_ads": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "X Ads API not implemented"
+                }
+              },
+              "reason": "x: application credentials are not configured."
+            },
+            {
+              "platform": "facebook",
+              "credentials_configured": false,
+              "vault_available": false,
+              "transport_available": false,
+              "publish_enabled": false,
+              "capabilities": {
+                "text_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "Page feed posts"
+                },
+                "image_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "Photos endpoint"
+                },
+                "video_post": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "Video upload not implemented"
+                },
+                "scheduling": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "native_scheduled_publish_time not implemented"
+                },
+                "analytics": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "post insights + reaction summaries"
+                },
+                "paid_ads": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "see the ads module; requires a founder authorisation"
+                }
+              },
+              "reason": "facebook: application credentials are not configured."
+            },
+            {
+              "platform": "reddit",
+              "credentials_configured": false,
+              "vault_available": false,
+              "transport_available": false,
+              "publish_enabled": false,
+              "capabilities": {
+                "text_post": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "self post"
+                },
+                "image_post": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "media upload requires the media_asset flow"
+                },
+                "video_post": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "not supported via the submit API"
+                },
+                "scheduling": {
+                  "documented": "unsupported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "no scheduling API"
+                },
+                "analytics": {
+                  "documented": "supported",
+                  "implemented": true,
+                  "usable": true,
+                  "verification": "unverified",
+                  "note": "score and comment count only"
+                },
+                "paid_ads": {
+                  "documented": "supported",
+                  "implemented": false,
+                  "usable": false,
+                  "verification": "unverified",
+                  "note": "Reddit Ads API not implemented"
+                }
+              },
+              "reason": "reddit: application credentials are not configured."
+            }
+          ],
+          "note": "No platform is publishable yet: platform application credentials and a token vault (TOKEN_VAULT_KEY) are both required. Approval and scheduling are fully implemented and no publish is ever simulated."
+        },
+        "ads": {
+          "status": "unavailable",
+          "mode": "founder_authorisation_required",
+          "max_authorized_spend_cents": 500000,
+          "transports": [
+            {
+              "platform": "meta_ads",
+              "implemented": true,
+              "credentials_configured": false,
+              "available": false,
+              "verification": "unverified",
+              "reason": "Meta Marketing API needs META_ADS_ACCESS_TOKEN and META_ADS_ACCOUNT_ID; POST /ads/transports reports this as unavailable until both exist.",
+              "docs_url": "https://developers.facebook.com/docs/marketing-apis",
+              "api_version": "v21.0"
+            },
+            {
+              "platform": "google_ads",
+              "implemented": true,
+              "credentials_configured": false,
+              "available": false,
+              "verification": "unverified",
+              "reason": "Google Ads needs GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN and GOOGLE_ADS_LOGIN_CUSTOMER_ID (the customer id with billing). Without all three the transport reports unavailable.",
+              "docs_url": "https://developers.google.com/google-ads/api/docs/start",
+              "api_version": "v17"
+            },
+            {
+              "platform": "linkedin_ads",
+              "implemented": true,
+              "credentials_configured": false,
+              "available": false,
+              "verification": "unverified",
+              "reason": "LinkedIn Ads needs LINKEDIN_ADS_ACCESS_TOKEN and LINKEDIN_ADS_ACCOUNT_URN, plus an app approved for the Advertising API. Without them the transport is unavailable.",
+              "docs_url": "https://learn.microsoft.com/en-us/linkedin/marketing/",
+              "api_version": "202405"
+            }
+          ],
+          "note": "Paid campaigns can be drafted by an agent, but every external mutation requires a single-use founder authorisation bound to the exact proposal hash. No ads transport is implemented in this build, so launches are refused and recorded rather than attempted."
+        },
+        "auth": {
+          "scheme": "JWT bearer",
+          "roles": [
+            "founder",
+            "marketer",
+            "viewer"
+          ],
+          "approver_role": "founder"
+        },
+        "director": {
+          "orchestrator": "langgraph",
+          "checkpointing": "database",
+          "human_in_the_loop": true,
+          "nodes": 20
+        },
+        "rate_limit": {
+          "driver": "memory",
+          "per_minute": 10000
+        }
+      }
+    },
+    {
+      "step": "brand",
+      "status": 200,
+      "payload": {
+        "id": "7782a6ae-108e-4d0b-a877-7e5681aeaa60",
+        "name": "Crusor AI",
+        "company": "Crusor AI",
+        "product": "AI-powered IDE",
+        "tagline": "Build and Ship with Ease",
+        "positioning": "",
+        "audience": [
+          "software developers",
+          "students and engineering students"
+        ],
+        "personality": [
+          "innovative",
+          "technical",
+          "premium",
+          "minimal"
+        ],
+        "tone_of_voice": [],
+        "visual_direction": {},
+        "brand_values": [],
+        "keywords": [],
+        "do_not_claim": [
+          "customer counts",
+          "funding amounts",
+          "revenue figures",
+          "performance benchmarks",
+          "testimonials",
+          "pricing"
+        ],
+        "prohibited_phrases": [],
+        "compliance_notes": "",
+        "version": 1,
+        "is_active": true,
+        "created_at": "2026-11-04T13:50:59",
+        "updated_at": "2026-11-04T13:50:59"
+      }
+    },
+    {
+      "step": "start_workflow",
+      "status": 201,
+      "payload": {
+        "status": "awaiting_approval",
+        "lifecycle_stage": "none",
+        "phase": "awaiting_approval",
+        "awaiting_human": null,
+        "iteration": 6,
+        "checkpoint_count": null,
+        "strategy_id": null,
+        "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
+        "content_item_ids": [
+          "8b368d01-661d-4f26-aa30-03c527659d1d"
+        ],
+        "schedule_plan": [],
+        "schedule_blocked": [],
+        "scheduled_post_ids": [],
+        "publish_results": null,
+        "analytics": null,
+        "optimizations": [],
+        "optimization_note": "",
+        "qa_verdict": "pass",
+        "trace": [
+          "intake",
+          "context_loaded",
+          "plan_created",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "dispatch_complete",
+          "review_completed",
+          "campaign_reused",
+          "drafts_persisted",
+          "approval_requested"
+        ],
+        "errors": [],
+        "results": {
+          "research-1": {
+            "agent": "research",
+            "output": {
+              "summary": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+goals+competitors",
+              "confidence": 0.62,
+              "warnings": [
+                "No marketing goals defined; research focus is unconstrained."
+              ],
+              "requires_human_review": true,
+              "audience_insights": [
+                {
+                  "segment": "software developers",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [
+                    "context switching between tools",
+                    "slow feedback loops"
+                  ],
+                  "content_angle": "Show how AI-powered IDE helps software developers ship."
+                },
+                {
+                  "segment": "students and engineering students",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [],
+                  "content_angle": "Show how AI-powered IDE helps students and engineering students ship."
+                }
+              ],
+              "positioning_gaps": [],
+              "competitor_observations": [
+                "Jasper: AI marketing content platform for enterprise teams",
+                "Copy.ai: AI GTM platform for go-to-market teams"
+              ],
+              "recommended_focus": [
+                "Establish Build and Ship with Ease as the developer-first promise."
+              ],
+              "research_project_id": null,
+              "provider": "",
+              "provider_status": "",
+              "findings_created": 0,
+              "sources_created": 0,
+              "findings": [],
+              "category_coverage": [],
+              "gaps": [],
+              "unresolved_questions": [],
+              "cost": {},
+              "limits": {},
+              "stop_reason": "",
+              "iterations": 0
+            }
+          },
+          "strategy-1": {
+            "agent": "strategy",
+            "output": {
+              "summary": "Planned 4 content slot(s) across 1 channel(s) over 14 day(s).",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+pillars",
+              "confidence": 0.6,
+              "warnings": [],
+              "requires_human_review": true,
+              "campaign_name": "Crusor AI \u2014 Product launch",
+              "objective": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "messaging_pillars": [
+                "Product",
+                "Developer stories",
+                "Education"
+              ],
+              "channel_mix": [
+                "linkedin"
+              ],
+              "content_plan": [
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product: Build and Ship with Ease",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Developer stories",
+                  "angle": "Developer stories deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Education",
+                  "angle": "Education deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                }
+              ],
+              "success_metrics": [
+                "Content approval turnaround (hours)",
+                "Publishing cadence adherence (%)",
+                "Engagement rate (measured, once connectors are live)"
+              ],
+              "risks": [
+                "No analytics connector configured: performance cannot be measured yet.",
+                "All claims must stay within the brand's approved factual envelope."
+              ]
+            }
+          },
+          "content-1": {
+            "agent": "content",
+            "output": {
+              "summary": "Mock linkedin social_post composed from the Phase 3A template bank (234 chars). Deterministic and non-billable.",
+              "generation_mode": "mock",
+              "data_source": "content_provider:mock",
+              "confidence": 0.55,
+              "warnings": [
+                "Draft composed by the deterministic mock provider, not by a language model."
+              ],
+              "requires_human_review": true,
+              "platform": "linkedin",
+              "headline": "Most developer tools optimise the wrong thing.",
+              "body": "Most developer tools optimise for the first run.\n\nThe run that actually matters is the tenth, when you are mid-change and out of patience.\n\nProduct: Build and Ship with Ease\n\nThat is the workflow we are building AI-powered IDE around.",
+              "hashtags": [
+                "#AIdev",
+                "#DevTools",
+                "#BuildAndShip"
+              ],
+              "call_to_action": "Curious how other teams handle this \u2014 reply if you have a strong opinion.",
+              "character_count": 234,
+              "detected_claims": [],
+              "content_type": "social_post",
+              "hook": "Most developer tools optimise the wrong thing.",
+              "campaign_id": "",
+              "objective": "",
+              "audience": "software developers, students and engineering students",
+              "pillar": "Product",
+              "primary_message": "Product: Build and Ship with Ease",
+              "outline": [],
+              "source_refs": [],
+              "brand_facts_used": [
+                {
+                  "statement": "Product: AI-powered IDE",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Company: Crusor AI",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Tagline: Build and Ship with Ease",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                }
+              ],
+              "verification_status": "verified",
+              "restricted_claims": [
+                "customer testimonials",
+                "user counts",
+                "performance benchmarks",
+                "pricing",
+                "competitor comparisons",
+                "integrations",
+                "launch dates",
+                "product availability"
+              ],
+              "suggested_date": "",
+              "suggested_time": "",
+              "variant_index": 0,
+              "provider": "mock",
+              "model": "mock-content-v1",
+              "is_mock": true,
+              "generation_metadata": {
+                "variant_index": 0,
+                "variant_seed": 0,
+                "platform_spec": {
+                  "body_max_chars": 2600,
+                  "hashtag_max": 3
+                },
+                "generation_mode": "mock",
+                "provider": "mock",
+                "model": "mock-content-v1",
+                "is_mock": true
+              }
+            }
+          },
+          "creative-1": {
+            "agent": "creative",
+            "output": {
+              "summary": "Creative brief prepared for linkedin carousel.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile.visual_direction",
+              "confidence": 0.7,
+              "warnings": [],
+              "requires_human_review": true,
+              "brief": {
+                "concept": "Product",
+                "composition": [
+                  "Dark charcoal canvas, generous negative space",
+                  "Headline top-left, product context bottom-right",
+                  "Single metallic accent line as visual anchor"
+                ],
+                "palette": {
+                  "background": "#0A0A0B",
+                  "surface": "#141416",
+                  "primary_text": "#E8E8EA",
+                  "accent": "#8B5CF6",
+                  "metallic": "#C0C0C8"
+                },
+                "typography": [
+                  "Geometric sans, tight tracking, two weights maximum"
+                ],
+                "motion_notes": [
+                  "Static frame; if animated, 200ms ease-out on the accent line subject"
+                ],
+                "negative_prompt": [
+                  "no fabricated product screenshots",
+                  "no invented customer logos",
+                  "no stock-photo people",
+                  "no percentage or benchmark overlays"
+                ],
+                "aspect_ratio": "4:5"
+              },
+              "image_generation_available": true,
+              "provider_status": "mock: the deterministic mock provider is active. No image or video model is called and nothing is billed.",
+              "director_brief": null
+            }
+          },
+          "growth-1": {
+            "agent": "growth_analyst",
+            "output": {
+              "summary": "No analytics snapshots in the selected window. No performance conclusions can be drawn yet.",
+              "generation_mode": "deterministic",
+              "data_source": "none",
+              "confidence": 0.85,
+              "warnings": [
+                "Analytics unavailable: results are a measurement plan, not an assessment."
+              ],
+              "requires_human_review": true,
+              "measured": {
+                "window_days": 30,
+                "snapshots": 0
+              },
+              "observations": [
+                "No published-post metrics have been collected.",
+                "No platform analytics connector is configured."
+              ],
+              "recommendations": [
+                {
+                  "action": "Instrument the publishing pipeline before optimising.",
+                  "rationale": "Optimisation without measurement is guesswork.",
+                  "expected_effect": "Enables attributable, per-post performance data.",
+                  "confidence": 0.9
+                }
+              ],
+              "measurement_plan": [
+                "Link at least one social account and complete OAuth.",
+                "Enable the analytics collector (Phase 2) to write analytics_snapshots.",
+                "Define the primary KPI on the campaign before publishing."
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "awaiting_approval",
+      "status": 200,
+      "payload": {
+        "status": "awaiting_approval",
+        "lifecycle_stage": "none",
+        "phase": "awaiting_approval",
+        "awaiting_human": true,
+        "iteration": 6,
+        "checkpoint_count": 19,
+        "strategy_id": null,
+        "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
+        "content_item_ids": [
+          "8b368d01-661d-4f26-aa30-03c527659d1d"
+        ],
+        "schedule_plan": [],
+        "schedule_blocked": [],
+        "scheduled_post_ids": [],
+        "publish_results": null,
+        "analytics": null,
+        "optimizations": [],
+        "optimization_note": "",
+        "qa_verdict": "pass",
+        "trace": [
+          "intake",
+          "context_loaded",
+          "plan_created",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "dispatch_complete",
+          "review_completed",
+          "campaign_reused",
+          "drafts_persisted",
+          "approval_requested"
+        ],
+        "errors": [],
+        "results": {
+          "research-1": {
+            "agent": "research",
+            "output": {
+              "summary": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+goals+competitors",
+              "confidence": 0.62,
+              "warnings": [
+                "No marketing goals defined; research focus is unconstrained."
+              ],
+              "requires_human_review": true,
+              "audience_insights": [
+                {
+                  "segment": "software developers",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [
+                    "context switching between tools",
+                    "slow feedback loops"
+                  ],
+                  "content_angle": "Show how AI-powered IDE helps software developers ship."
+                },
+                {
+                  "segment": "students and engineering students",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [],
+                  "content_angle": "Show how AI-powered IDE helps students and engineering students ship."
+                }
+              ],
+              "positioning_gaps": [],
+              "competitor_observations": [
+                "Jasper: AI marketing content platform for enterprise teams",
+                "Copy.ai: AI GTM platform for go-to-market teams"
+              ],
+              "recommended_focus": [
+                "Establish Build and Ship with Ease as the developer-first promise."
+              ],
+              "research_project_id": null,
+              "provider": "",
+              "provider_status": "",
+              "findings_created": 0,
+              "sources_created": 0,
+              "findings": [],
+              "category_coverage": [],
+              "gaps": [],
+              "unresolved_questions": [],
+              "cost": {},
+              "limits": {},
+              "stop_reason": "",
+              "iterations": 0
+            }
+          },
+          "strategy-1": {
+            "agent": "strategy",
+            "output": {
+              "summary": "Planned 4 content slot(s) across 1 channel(s) over 14 day(s).",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+pillars",
+              "confidence": 0.6,
+              "warnings": [],
+              "requires_human_review": true,
+              "campaign_name": "Crusor AI \u2014 Product launch",
+              "objective": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "messaging_pillars": [
+                "Product",
+                "Developer stories",
+                "Education"
+              ],
+              "channel_mix": [
+                "linkedin"
+              ],
+              "content_plan": [
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product: Build and Ship with Ease",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Developer stories",
+                  "angle": "Developer stories deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Education",
+                  "angle": "Education deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                }
+              ],
+              "success_metrics": [
+                "Content approval turnaround (hours)",
+                "Publishing cadence adherence (%)",
+                "Engagement rate (measured, once connectors are live)"
+              ],
+              "risks": [
+                "No analytics connector configured: performance cannot be measured yet.",
+                "All claims must stay within the brand's approved factual envelope."
+              ]
+            }
+          },
+          "content-1": {
+            "agent": "content",
+            "output": {
+              "summary": "Mock linkedin social_post composed from the Phase 3A template bank (234 chars). Deterministic and non-billable.",
+              "generation_mode": "mock",
+              "data_source": "content_provider:mock",
+              "confidence": 0.55,
+              "warnings": [
+                "Draft composed by the deterministic mock provider, not by a language model."
+              ],
+              "requires_human_review": true,
+              "platform": "linkedin",
+              "headline": "Most developer tools optimise the wrong thing.",
+              "body": "Most developer tools optimise for the first run.\n\nThe run that actually matters is the tenth, when you are mid-change and out of patience.\n\nProduct: Build and Ship with Ease\n\nThat is the workflow we are building AI-powered IDE around.",
+              "hashtags": [
+                "#AIdev",
+                "#DevTools",
+                "#BuildAndShip"
+              ],
+              "call_to_action": "Curious how other teams handle this \u2014 reply if you have a strong opinion.",
+              "character_count": 234,
+              "detected_claims": [],
+              "content_type": "social_post",
+              "hook": "Most developer tools optimise the wrong thing.",
+              "campaign_id": "",
+              "objective": "",
+              "audience": "software developers, students and engineering students",
+              "pillar": "Product",
+              "primary_message": "Product: Build and Ship with Ease",
+              "outline": [],
+              "source_refs": [],
+              "brand_facts_used": [
+                {
+                  "statement": "Product: AI-powered IDE",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Company: Crusor AI",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Tagline: Build and Ship with Ease",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                }
+              ],
+              "verification_status": "verified",
+              "restricted_claims": [
+                "customer testimonials",
+                "user counts",
+                "performance benchmarks",
+                "pricing",
+                "competitor comparisons",
+                "integrations",
+                "launch dates",
+                "product availability"
+              ],
+              "suggested_date": "",
+              "suggested_time": "",
+              "variant_index": 0,
+              "provider": "mock",
+              "model": "mock-content-v1",
+              "is_mock": true,
+              "generation_metadata": {
+                "variant_index": 0,
+                "variant_seed": 0,
+                "platform_spec": {
+                  "body_max_chars": 2600,
+                  "hashtag_max": 3
+                },
+                "generation_mode": "mock",
+                "provider": "mock",
+                "model": "mock-content-v1",
+                "is_mock": true
+              }
+            }
+          },
+          "creative-1": {
+            "agent": "creative",
+            "output": {
+              "summary": "Creative brief prepared for linkedin carousel.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile.visual_direction",
+              "confidence": 0.7,
+              "warnings": [],
+              "requires_human_review": true,
+              "brief": {
+                "concept": "Product",
+                "composition": [
+                  "Dark charcoal canvas, generous negative space",
+                  "Headline top-left, product context bottom-right",
+                  "Single metallic accent line as visual anchor"
+                ],
+                "palette": {
+                  "background": "#0A0A0B",
+                  "surface": "#141416",
+                  "primary_text": "#E8E8EA",
+                  "accent": "#8B5CF6",
+                  "metallic": "#C0C0C8"
+                },
+                "typography": [
+                  "Geometric sans, tight tracking, two weights maximum"
+                ],
+                "motion_notes": [
+                  "Static frame; if animated, 200ms ease-out on the accent line subject"
+                ],
+                "negative_prompt": [
+                  "no fabricated product screenshots",
+                  "no invented customer logos",
+                  "no stock-photo people",
+                  "no percentage or benchmark overlays"
+                ],
+                "aspect_ratio": "4:5"
+              },
+              "image_generation_available": true,
+              "provider_status": "mock: the deterministic mock provider is active. No image or video model is called and nothing is billed.",
+              "director_brief": null
+            }
+          },
+          "growth-1": {
+            "agent": "growth_analyst",
+            "output": {
+              "summary": "No analytics snapshots in the selected window. No performance conclusions can be drawn yet.",
+              "generation_mode": "deterministic",
+              "data_source": "none",
+              "confidence": 0.85,
+              "warnings": [
+                "Analytics unavailable: results are a measurement plan, not an assessment."
+              ],
+              "requires_human_review": true,
+              "measured": {
+                "window_days": 30,
+                "snapshots": 0
+              },
+              "observations": [
+                "No published-post metrics have been collected.",
+                "No platform analytics connector is configured."
+              ],
+              "recommendations": [
+                {
+                  "action": "Instrument the publishing pipeline before optimising.",
+                  "rationale": "Optimisation without measurement is guesswork.",
+                  "expected_effect": "Enables attributable, per-post performance data.",
+                  "confidence": 0.9
+                }
+              ],
+              "measurement_plan": [
+                "Link at least one social account and complete OAuth.",
+                "Enable the analytics collector (Phase 2) to write analytics_snapshots.",
+                "Define the primary KPI on the campaign before publishing."
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "founder_approval",
+      "status": 200,
+      "payload": {
+        "status": "completed",
+        "lifecycle_stage": "handed_off",
+        "phase": "completed",
+        "awaiting_human": false,
+        "iteration": 6,
+        "checkpoint_count": 26,
+        "strategy_id": null,
+        "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
+        "content_item_ids": [
+          "8b368d01-661d-4f26-aa30-03c527659d1d"
+        ],
+        "schedule_plan": [],
+        "schedule_blocked": [
+          {
+            "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+            "platform": "linkedin",
+            "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
+          }
+        ],
+        "scheduled_post_ids": [],
+        "publish_results": {
+          "published": [],
+          "failed": [],
+          "deferred": [],
+          "detail": "0 post(s) left to the scheduler; the founder did not ask for immediate publication."
+        },
+        "analytics": {
+          "available": false,
+          "ingested": 0,
+          "skipped": 0,
+          "unavailable": [
+            {
+              "platform": "all",
+              "reason": "token vault is disabled (TOKEN_VAULT_BACKEND=none); OAuth connections are unavailable"
+            }
+          ],
+          "detail": "Analytics ingestion is disabled: no credential vault."
+        },
+        "optimizations": [],
+        "optimization_note": "No measured performance is available yet, so no optimisation was proposed. Performance is read from the platform APIs; it is never inferred.",
+        "qa_verdict": "pass",
+        "trace": [
+          "intake",
+          "context_loaded",
+          "plan_created",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "dispatch_complete",
+          "review_completed",
+          "campaign_reused",
+          "drafts_persisted",
+          "approval_requested",
+          "human_decision_received",
+          "decision_applied",
+          "content_scheduled",
+          "publish_attempted",
+          "analytics_read",
+          "optimisation_skipped",
+          "finalized"
+        ],
+        "errors": [
+          {
+            "at": "2026-11-04T15:39:44.126819+00:00",
+            "stage": "schedule",
+            "code": "blocked",
+            "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
+            "platform": "linkedin"
+          }
+        ],
+        "results": {
+          "research-1": {
+            "agent": "research",
+            "output": {
+              "summary": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+goals+competitors",
+              "confidence": 0.62,
+              "warnings": [
+                "No marketing goals defined; research focus is unconstrained."
+              ],
+              "requires_human_review": true,
+              "audience_insights": [
+                {
+                  "segment": "software developers",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [
+                    "context switching between tools",
+                    "slow feedback loops"
+                  ],
+                  "content_angle": "Show how AI-powered IDE helps software developers ship."
+                },
+                {
+                  "segment": "students and engineering students",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [],
+                  "content_angle": "Show how AI-powered IDE helps students and engineering students ship."
+                }
+              ],
+              "positioning_gaps": [],
+              "competitor_observations": [
+                "Jasper: AI marketing content platform for enterprise teams",
+                "Copy.ai: AI GTM platform for go-to-market teams"
+              ],
+              "recommended_focus": [
+                "Establish Build and Ship with Ease as the developer-first promise."
+              ],
+              "research_project_id": null,
+              "provider": "",
+              "provider_status": "",
+              "findings_created": 0,
+              "sources_created": 0,
+              "findings": [],
+              "category_coverage": [],
+              "gaps": [],
+              "unresolved_questions": [],
+              "cost": {},
+              "limits": {},
+              "stop_reason": "",
+              "iterations": 0
+            }
+          },
+          "strategy-1": {
+            "agent": "strategy",
+            "output": {
+              "summary": "Planned 4 content slot(s) across 1 channel(s) over 14 day(s).",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+pillars",
+              "confidence": 0.6,
+              "warnings": [],
+              "requires_human_review": true,
+              "campaign_name": "Crusor AI \u2014 Product launch",
+              "objective": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "messaging_pillars": [
+                "Product",
+                "Developer stories",
+                "Education"
+              ],
+              "channel_mix": [
+                "linkedin"
+              ],
+              "content_plan": [
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product: Build and Ship with Ease",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Developer stories",
+                  "angle": "Developer stories deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Education",
+                  "angle": "Education deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                }
+              ],
+              "success_metrics": [
+                "Content approval turnaround (hours)",
+                "Publishing cadence adherence (%)",
+                "Engagement rate (measured, once connectors are live)"
+              ],
+              "risks": [
+                "No analytics connector configured: performance cannot be measured yet.",
+                "All claims must stay within the brand's approved factual envelope."
+              ]
+            }
+          },
+          "content-1": {
+            "agent": "content",
+            "output": {
+              "summary": "Mock linkedin social_post composed from the Phase 3A template bank (234 chars). Deterministic and non-billable.",
+              "generation_mode": "mock",
+              "data_source": "content_provider:mock",
+              "confidence": 0.55,
+              "warnings": [
+                "Draft composed by the deterministic mock provider, not by a language model."
+              ],
+              "requires_human_review": true,
+              "platform": "linkedin",
+              "headline": "Most developer tools optimise the wrong thing.",
+              "body": "Most developer tools optimise for the first run.\n\nThe run that actually matters is the tenth, when you are mid-change and out of patience.\n\nProduct: Build and Ship with Ease\n\nThat is the workflow we are building AI-powered IDE around.",
+              "hashtags": [
+                "#AIdev",
+                "#DevTools",
+                "#BuildAndShip"
+              ],
+              "call_to_action": "Curious how other teams handle this \u2014 reply if you have a strong opinion.",
+              "character_count": 234,
+              "detected_claims": [],
+              "content_type": "social_post",
+              "hook": "Most developer tools optimise the wrong thing.",
+              "campaign_id": "",
+              "objective": "",
+              "audience": "software developers, students and engineering students",
+              "pillar": "Product",
+              "primary_message": "Product: Build and Ship with Ease",
+              "outline": [],
+              "source_refs": [],
+              "brand_facts_used": [
+                {
+                  "statement": "Product: AI-powered IDE",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Company: Crusor AI",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Tagline: Build and Ship with Ease",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                }
+              ],
+              "verification_status": "verified",
+              "restricted_claims": [
+                "customer testimonials",
+                "user counts",
+                "performance benchmarks",
+                "pricing",
+                "competitor comparisons",
+                "integrations",
+                "launch dates",
+                "product availability"
+              ],
+              "suggested_date": "",
+              "suggested_time": "",
+              "variant_index": 0,
+              "provider": "mock",
+              "model": "mock-content-v1",
+              "is_mock": true,
+              "generation_metadata": {
+                "variant_index": 0,
+                "variant_seed": 0,
+                "platform_spec": {
+                  "body_max_chars": 2600,
+                  "hashtag_max": 3
+                },
+                "generation_mode": "mock",
+                "provider": "mock",
+                "model": "mock-content-v1",
+                "is_mock": true
+              }
+            }
+          },
+          "creative-1": {
+            "agent": "creative",
+            "output": {
+              "summary": "Creative brief prepared for linkedin carousel.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile.visual_direction",
+              "confidence": 0.7,
+              "warnings": [],
+              "requires_human_review": true,
+              "brief": {
+                "concept": "Product",
+                "composition": [
+                  "Dark charcoal canvas, generous negative space",
+                  "Headline top-left, product context bottom-right",
+                  "Single metallic accent line as visual anchor"
+                ],
+                "palette": {
+                  "background": "#0A0A0B",
+                  "surface": "#141416",
+                  "primary_text": "#E8E8EA",
+                  "accent": "#8B5CF6",
+                  "metallic": "#C0C0C8"
+                },
+                "typography": [
+                  "Geometric sans, tight tracking, two weights maximum"
+                ],
+                "motion_notes": [
+                  "Static frame; if animated, 200ms ease-out on the accent line subject"
+                ],
+                "negative_prompt": [
+                  "no fabricated product screenshots",
+                  "no invented customer logos",
+                  "no stock-photo people",
+                  "no percentage or benchmark overlays"
+                ],
+                "aspect_ratio": "4:5"
+              },
+              "image_generation_available": true,
+              "provider_status": "mock: the deterministic mock provider is active. No image or video model is called and nothing is billed.",
+              "director_brief": null
+            }
+          },
+          "growth-1": {
+            "agent": "growth_analyst",
+            "output": {
+              "summary": "No analytics snapshots in the selected window. No performance conclusions can be drawn yet.",
+              "generation_mode": "deterministic",
+              "data_source": "none",
+              "confidence": 0.85,
+              "warnings": [
+                "Analytics unavailable: results are a measurement plan, not an assessment."
+              ],
+              "requires_human_review": true,
+              "measured": {
+                "window_days": 30,
+                "snapshots": 0
+              },
+              "observations": [
+                "No published-post metrics have been collected.",
+                "No platform analytics connector is configured."
+              ],
+              "recommendations": [
+                {
+                  "action": "Instrument the publishing pipeline before optimising.",
+                  "rationale": "Optimisation without measurement is guesswork.",
+                  "expected_effect": "Enables attributable, per-post performance data.",
+                  "confidence": 0.9
+                }
+              ],
+              "measurement_plan": [
+                "Link at least one social account and complete OAuth.",
+                "Enable the analytics collector (Phase 2) to write analytics_snapshots.",
+                "Define the primary KPI on the campaign before publishing."
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "lifecycle_final",
+      "status": 200,
+      "payload": {
+        "status": "completed",
+        "lifecycle_stage": "handed_off",
+        "phase": "completed",
+        "awaiting_human": false,
+        "iteration": 6,
+        "checkpoint_count": 26,
+        "strategy_id": null,
+        "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
+        "content_item_ids": [
+          "8b368d01-661d-4f26-aa30-03c527659d1d"
+        ],
+        "schedule_plan": [],
+        "schedule_blocked": [
+          {
+            "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+            "platform": "linkedin",
+            "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
+          }
+        ],
+        "scheduled_post_ids": [],
+        "publish_results": {
+          "published": [],
+          "failed": [],
+          "deferred": [],
+          "detail": "0 post(s) left to the scheduler; the founder did not ask for immediate publication."
+        },
+        "analytics": {
+          "available": false,
+          "ingested": 0,
+          "skipped": 0,
+          "unavailable": [
+            {
+              "platform": "all",
+              "reason": "token vault is disabled (TOKEN_VAULT_BACKEND=none); OAuth connections are unavailable"
+            }
+          ],
+          "detail": "Analytics ingestion is disabled: no credential vault."
+        },
+        "optimizations": [],
+        "optimization_note": "No measured performance is available yet, so no optimisation was proposed. Performance is read from the platform APIs; it is never inferred.",
+        "qa_verdict": "pass",
+        "trace": [
+          "intake",
+          "context_loaded",
+          "plan_created",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "task_dispatched",
+          "agent_completed",
+          "dispatch_complete",
+          "review_completed",
+          "campaign_reused",
+          "drafts_persisted",
+          "approval_requested",
+          "human_decision_received",
+          "decision_applied",
+          "content_scheduled",
+          "publish_attempted",
+          "analytics_read",
+          "optimisation_skipped",
+          "finalized"
+        ],
+        "errors": [
+          {
+            "at": "2026-11-04T15:39:44.126819+00:00",
+            "stage": "schedule",
+            "code": "blocked",
+            "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
+            "platform": "linkedin"
+          }
+        ],
+        "results": {
+          "research-1": {
+            "agent": "research",
+            "output": {
+              "summary": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+goals+competitors",
+              "confidence": 0.62,
+              "warnings": [
+                "No marketing goals defined; research focus is unconstrained."
+              ],
+              "requires_human_review": true,
+              "audience_insights": [
+                {
+                  "segment": "software developers",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [
+                    "context switching between tools",
+                    "slow feedback loops"
+                  ],
+                  "content_angle": "Show how AI-powered IDE helps software developers ship."
+                },
+                {
+                  "segment": "students and engineering students",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [],
+                  "content_angle": "Show how AI-powered IDE helps students and engineering students ship."
+                }
+              ],
+              "positioning_gaps": [],
+              "competitor_observations": [
+                "Jasper: AI marketing content platform for enterprise teams",
+                "Copy.ai: AI GTM platform for go-to-market teams"
+              ],
+              "recommended_focus": [
+                "Establish Build and Ship with Ease as the developer-first promise."
+              ],
+              "research_project_id": null,
+              "provider": "",
+              "provider_status": "",
+              "findings_created": 0,
+              "sources_created": 0,
+              "findings": [],
+              "category_coverage": [],
+              "gaps": [],
+              "unresolved_questions": [],
+              "cost": {},
+              "limits": {},
+              "stop_reason": "",
+              "iterations": 0
+            }
+          },
+          "strategy-1": {
+            "agent": "strategy",
+            "output": {
+              "summary": "Planned 4 content slot(s) across 1 channel(s) over 14 day(s).",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+pillars",
+              "confidence": 0.6,
+              "warnings": [],
+              "requires_human_review": true,
+              "campaign_name": "Crusor AI \u2014 Product launch",
+              "objective": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "messaging_pillars": [
+                "Product",
+                "Developer stories",
+                "Education"
+              ],
+              "channel_mix": [
+                "linkedin"
+              ],
+              "content_plan": [
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product: Build and Ship with Ease",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Developer stories",
+                  "angle": "Developer stories deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Education",
+                  "angle": "Education deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                }
+              ],
+              "success_metrics": [
+                "Content approval turnaround (hours)",
+                "Publishing cadence adherence (%)",
+                "Engagement rate (measured, once connectors are live)"
+              ],
+              "risks": [
+                "No analytics connector configured: performance cannot be measured yet.",
+                "All claims must stay within the brand's approved factual envelope."
+              ]
+            }
+          },
+          "content-1": {
+            "agent": "content",
+            "output": {
+              "summary": "Mock linkedin social_post composed from the Phase 3A template bank (234 chars). Deterministic and non-billable.",
+              "generation_mode": "mock",
+              "data_source": "content_provider:mock",
+              "confidence": 0.55,
+              "warnings": [
+                "Draft composed by the deterministic mock provider, not by a language model."
+              ],
+              "requires_human_review": true,
+              "platform": "linkedin",
+              "headline": "Most developer tools optimise the wrong thing.",
+              "body": "Most developer tools optimise for the first run.\n\nThe run that actually matters is the tenth, when you are mid-change and out of patience.\n\nProduct: Build and Ship with Ease\n\nThat is the workflow we are building AI-powered IDE around.",
+              "hashtags": [
+                "#AIdev",
+                "#DevTools",
+                "#BuildAndShip"
+              ],
+              "call_to_action": "Curious how other teams handle this \u2014 reply if you have a strong opinion.",
+              "character_count": 234,
+              "detected_claims": [],
+              "content_type": "social_post",
+              "hook": "Most developer tools optimise the wrong thing.",
+              "campaign_id": "",
+              "objective": "",
+              "audience": "software developers, students and engineering students",
+              "pillar": "Product",
+              "primary_message": "Product: Build and Ship with Ease",
+              "outline": [],
+              "source_refs": [],
+              "brand_facts_used": [
+                {
+                  "statement": "Product: AI-powered IDE",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Company: Crusor AI",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Tagline: Build and Ship with Ease",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                }
+              ],
+              "verification_status": "verified",
+              "restricted_claims": [
+                "customer testimonials",
+                "user counts",
+                "performance benchmarks",
+                "pricing",
+                "competitor comparisons",
+                "integrations",
+                "launch dates",
+                "product availability"
+              ],
+              "suggested_date": "",
+              "suggested_time": "",
+              "variant_index": 0,
+              "provider": "mock",
+              "model": "mock-content-v1",
+              "is_mock": true,
+              "generation_metadata": {
+                "variant_index": 0,
+                "variant_seed": 0,
+                "platform_spec": {
+                  "body_max_chars": 2600,
+                  "hashtag_max": 3
+                },
+                "generation_mode": "mock",
+                "provider": "mock",
+                "model": "mock-content-v1",
+                "is_mock": true
+              }
+            }
+          },
+          "creative-1": {
+            "agent": "creative",
+            "output": {
+              "summary": "Creative brief prepared for linkedin carousel.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile.visual_direction",
+              "confidence": 0.7,
+              "warnings": [],
+              "requires_human_review": true,
+              "brief": {
+                "concept": "Product",
+                "composition": [
+                  "Dark charcoal canvas, generous negative space",
+                  "Headline top-left, product context bottom-right",
+                  "Single metallic accent line as visual anchor"
+                ],
+                "palette": {
+                  "background": "#0A0A0B",
+                  "surface": "#141416",
+                  "primary_text": "#E8E8EA",
+                  "accent": "#8B5CF6",
+                  "metallic": "#C0C0C8"
+                },
+                "typography": [
+                  "Geometric sans, tight tracking, two weights maximum"
+                ],
+                "motion_notes": [
+                  "Static frame; if animated, 200ms ease-out on the accent line subject"
+                ],
+                "negative_prompt": [
+                  "no fabricated product screenshots",
+                  "no invented customer logos",
+                  "no stock-photo people",
+                  "no percentage or benchmark overlays"
+                ],
+                "aspect_ratio": "4:5"
+              },
+              "image_generation_available": true,
+              "provider_status": "mock: the deterministic mock provider is active. No image or video model is called and nothing is billed.",
+              "director_brief": null
+            }
+          },
+          "growth-1": {
+            "agent": "growth_analyst",
+            "output": {
+              "summary": "No analytics snapshots in the selected window. No performance conclusions can be drawn yet.",
+              "generation_mode": "deterministic",
+              "data_source": "none",
+              "confidence": 0.85,
+              "warnings": [
+                "Analytics unavailable: results are a measurement plan, not an assessment."
+              ],
+              "requires_human_review": true,
+              "measured": {
+                "window_days": 30,
+                "snapshots": 0
+              },
+              "observations": [
+                "No published-post metrics have been collected.",
+                "No platform analytics connector is configured."
+              ],
+              "recommendations": [
+                {
+                  "action": "Instrument the publishing pipeline before optimising.",
+                  "rationale": "Optimisation without measurement is guesswork.",
+                  "expected_effect": "Enables attributable, per-post performance data.",
+                  "confidence": 0.9
+                }
+              ],
+              "measurement_plan": [
+                "Link at least one social account and complete OAuth.",
+                "Enable the analytics collector (Phase 2) to write analytics_snapshots.",
+                "Define the primary KPI on the campaign before publishing."
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "step": "create_editor",
+      "status": 422,
+      "payload": {
+        "error": {
+          "code": "validation_error",
+          "message": "The request payload is invalid.",
+          "details": {
+            "fields": [
+              {
+                "loc": "body.email",
+                "message": "value is not a valid email address: The part after the @-sign is a special-use or reserved name that cannot be used with email.",
+                "type": "value_error"
+              },
+              {
+                "loc": "body.role",
+                "message": "String should match pattern '^(founder|marketer|viewer)$'",
+                "type": "string_pattern_mismatch"
+              }
+            ]
+          },
+          "request_id": "924ed0ee4fea4ccc9b021e632bd263b7"
+        }
+      }
+    },
+    {
+      "step": "editor_approval_attempt",
+      "status": 401,
+      "payload": {
+        "error": {
+          "code": "unauthenticated",
+          "message": "Missing bearer token.",
+          "details": {},
+          "request_id": "19ac0f275d6e419b891651311181f797"
+        }
+      }
+    },
+    {
+      "step": "repeat_approval",
+      "status": 200,
+      "payload": {
+        "workflow_id": "wf_7782a6ae_ab2dc4dc04_95edd0",
+        "status": "completed",
+        "brand_profile_id": "7782a6ae-108e-4d0b-a877-7e5681aeaa60",
+        "phase": "completed",
+        "next": [],
+        "awaiting_human": false,
+        "interrupts": [],
+        "iteration": 6,
+        "plan": [
+          {
+            "id": "research-1",
+            "agent": "research",
+            "action": "audience_research",
+            "params": {
+              "request": "Acquire developers for Crusor AI through technical content",
+              "platforms": [
+                "linkedin"
+              ]
+            },
+            "depends_on": [],
+            "status": "done"
+          },
+          {
+            "id": "strategy-1",
+            "agent": "strategy",
+            "action": "campaign_plan",
+            "params": {
+              "platforms": [
+                "linkedin"
+              ],
+              "duration_days": 14
+            },
+            "depends_on": [
+              "research-1"
+            ],
+            "status": "done"
+          },
+          {
+            "id": "content-1",
+            "agent": "content",
+            "action": "draft_copy",
+            "params": {
+              "platform": "linkedin",
+              "slot_index": 0
+            },
+            "depends_on": [
+              "strategy-1"
+            ],
+            "status": "done"
+          },
+          {
+            "id": "creative-1",
+            "agent": "creative",
+            "action": "art_direction",
+            "params": {
+              "platform": "linkedin",
+              "format": "carousel"
+            },
+            "depends_on": [
+              "strategy-1"
+            ],
+            "status": "done"
+          },
+          {
+            "id": "growth-1",
+            "agent": "growth_analyst",
+            "action": "baseline_review",
+            "params": {
+              "window_days": 30
+            },
+            "depends_on": [
+              "strategy-1"
+            ],
+            "status": "done"
+          }
+        ],
+        "qa_verdict": "pass",
+        "qa_findings": [
+          {
+            "platform": "linkedin",
+            "verdict": "pass",
+            "score": 1.0,
+            "violations": []
+          }
+        ],
+        "approval_request": {
+          "workflow_id": "wf_7782a6ae_ab2dc4dc04_95edd0",
+          "requested_at": "2026-11-04T15:39:43.972277+00:00",
+          "items": [
+            {
+              "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+              "title": "Most developer tools optimise the wrong thing.",
+              "platform": "linkedin",
+              "status": "IN_REVIEW",
+              "content_version_id": "01337235-60d6-457c-9664-b966905807f1",
+              "version_count": 1
+            }
+          ],
+          "qa_verdict": "pass",
+          "qa_findings": [
+            {
+              "platform": "linkedin",
+              "verdict": "pass",
+              "score": 1.0,
+              "violations": []
+            }
+          ],
+          "summary": "QA verdict: pass. 1 draft(s) prepared for founder review.",
+          "decision_options": [
+            "approve",
+            "request_changes",
+            "reject"
+          ],
+          "note": "Founder approval is required. No content is published by this workflow; publishing is a separate, approval-gated operation."
+        },
+        "approval_decision": {
+          "action": "approve",
+          "reason": "Phase 4.3 lifecycle evidence",
+          "actor_id": "935c1751-9c48-4729-a9cb-d78470cba154",
+          "schedule": true,
+          "publish_now": false,
+          "horizon_days": 7,
+          "decided_at": "2026-11-04T15:39:44.088248+00:00"
+        },
+        "content_item_ids": [
+          "8b368d01-661d-4f26-aa30-03c527659d1d"
+        ],
+        "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
+        "summary": "Workflow completed. Founder decision: approve. 1 item(s) updated. Scheduled: 0 (1 blocked). Published now: 0. Measured analytics: not available. Recommendations: 0 (none applied automatically).",
+        "lifecycle_stage": "handed_off",
+        "schedule_plan": [],
+        "schedule_blocked": [
+          {
+            "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+            "platform": "linkedin",
+            "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
+          }
+        ],
+        "scheduled_post_ids": [],
+        "publish_results": {
+          "published": [],
+          "failed": [],
+          "deferred": [],
+          "detail": "0 post(s) left to the scheduler; the founder did not ask for immediate publication."
+        },
+        "analytics": {
+          "available": false,
+          "ingested": 0,
+          "skipped": 0,
+          "unavailable": [
+            {
+              "platform": "all",
+              "reason": "token vault is disabled (TOKEN_VAULT_BACKEND=none); OAuth connections are unavailable"
+            }
+          ],
+          "detail": "Analytics ingestion is disabled: no credential vault."
+        },
+        "optimizations": [],
+        "optimization_note": "No measured performance is available yet, so no optimisation was proposed. Performance is read from the platform APIs; it is never inferred.",
+        "trace": [
+          {
+            "at": "2026-11-04T15:39:43.682678+00:00",
+            "entry": "intake",
+            "brand": "7782a6ae-108e-4d0b-a877-7e5681aeaa60"
+          },
+          {
+            "at": "2026-11-04T15:39:43.683551+00:00",
+            "entry": "context_loaded",
+            "goals": 0,
+            "audience": 2,
+            "personality": 4
+          },
+          {
+            "at": "2026-11-04T15:39:43.719688+00:00",
+            "entry": "plan_created",
+            "tasks": 5,
+            "agents": [
+              "content",
+              "creative",
+              "growth_analyst",
+              "research",
+              "strategy"
+            ],
+            "deps": {
+              "research-1": [],
+              "strategy-1": [
+                "research-1"
+              ],
+              "content-1": [
+                "strategy-1"
+              ],
+              "creative-1": [
+                "strategy-1"
+              ],
+              "growth-1": [
+                "strategy-1"
+              ]
+            },
+            "mode": "deterministic_executor"
+          },
+          {
+            "at": "2026-11-04T15:39:43.729299+00:00",
+            "entry": "task_dispatched",
+            "task": "research-1",
+            "agent": "research",
+            "iteration": 1
+          },
+          {
+            "at": "2026-11-04T15:39:43.753623+00:00",
+            "entry": "agent_completed",
+            "agent": "research",
+            "task": "research-1",
+            "mode": "deterministic",
+            "confidence": 0.62
+          },
+          {
+            "at": "2026-11-04T15:39:43.766006+00:00",
+            "entry": "task_dispatched",
+            "task": "strategy-1",
+            "agent": "strategy",
+            "iteration": 2
+          },
+          {
+            "at": "2026-11-04T15:39:43.789356+00:00",
+            "entry": "agent_completed",
+            "agent": "strategy",
+            "task": "strategy-1",
+            "mode": "deterministic",
+            "confidence": 0.6
+          },
+          {
+            "at": "2026-11-04T15:39:43.800044+00:00",
+            "entry": "task_dispatched",
+            "task": "content-1",
+            "agent": "content",
+            "iteration": 3
+          },
+          {
+            "at": "2026-11-04T15:39:43.823567+00:00",
+            "entry": "agent_completed",
+            "agent": "content",
+            "task": "content-1",
+            "mode": "mock",
+            "confidence": 0.55
+          },
+          {
+            "at": "2026-11-04T15:39:43.834746+00:00",
+            "entry": "task_dispatched",
+            "task": "creative-1",
+            "agent": "creative",
+            "iteration": 4
+          },
+          {
+            "at": "2026-11-04T15:39:43.856406+00:00",
+            "entry": "agent_completed",
+            "agent": "creative",
+            "task": "creative-1",
+            "mode": "deterministic",
+            "confidence": 0.7
+          },
+          {
+            "at": "2026-11-04T15:39:43.866740+00:00",
+            "entry": "task_dispatched",
+            "task": "growth-1",
+            "agent": "growth_analyst",
+            "iteration": 5
+          },
+          {
+            "at": "2026-11-04T15:39:43.889127+00:00",
+            "entry": "agent_completed",
+            "agent": "growth_analyst",
+            "task": "growth-1",
+            "mode": "deterministic",
+            "confidence": 0.85
+          },
+          {
+            "at": "2026-11-04T15:39:43.900300+00:00",
+            "entry": "dispatch_complete",
+            "iteration": 6
+          },
+          {
+            "at": "2026-11-04T15:39:43.920436+00:00",
+            "entry": "review_completed",
+            "verdict": "pass",
+            "drafts": 1,
+            "findings": 1
+          },
+          {
+            "at": "2026-11-04T15:39:43.935774+00:00",
+            "entry": "campaign_reused",
+            "name": "Crusor AI \u2014 Product launch"
+          },
+          {
+            "at": "2026-11-04T15:39:43.956272+00:00",
+            "entry": "drafts_persisted",
+            "count": 1
+          },
+          {
+            "at": "2026-11-04T15:39:43.972290+00:00",
+            "entry": "approval_requested",
+            "items": 1
+          },
+          {
+            "entry": "human_decision_received",
+            "action": "approve"
+          },
+          {
+            "at": "2026-11-04T15:39:44.112623+00:00",
+            "entry": "decision_applied",
+            "action": "approve",
+            "items": 1
+          },
+          {
+            "at": "2026-11-04T15:39:44.126832+00:00",
+            "entry": "content_scheduled",
+            "scheduled": 0,
+            "blocked": 1
+          },
+          {
+            "at": "2026-11-04T15:39:44.137113+00:00",
+            "entry": "publish_attempted",
+            "published": 0,
+            "failed": 0,
+            "deferred": 0
+          },
+          {
+            "at": "2026-11-04T15:39:44.154989+00:00",
+            "entry": "analytics_read",
+            "available": false,
+            "ingested": 0
+          },
+          {
+            "at": "2026-11-04T15:39:44.178321+00:00",
+            "entry": "optimisation_skipped",
+            "reason": "no_measurements"
+          },
+          {
+            "at": "2026-11-04T15:39:44.189121+00:00",
+            "entry": "finalized",
+            "action": "approve",
+            "items": 1,
+            "scheduled": 0,
+            "blocked": 1
+          }
+        ],
+        "errors": [
+          {
+            "at": "2026-11-04T15:39:44.126819+00:00",
+            "stage": "schedule",
+            "code": "blocked",
+            "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
+            "platform": "linkedin"
+          }
+        ],
+        "results": {
+          "research-1": {
+            "agent": "research",
+            "output": {
+              "summary": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+goals+competitors",
+              "confidence": 0.62,
+              "warnings": [
+                "No marketing goals defined; research focus is unconstrained."
+              ],
+              "requires_human_review": true,
+              "audience_insights": [
+                {
+                  "segment": "software developers",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [
+                    "context switching between tools",
+                    "slow feedback loops"
+                  ],
+                  "content_angle": "Show how AI-powered IDE helps software developers ship."
+                },
+                {
+                  "segment": "students and engineering students",
+                  "motivation": [
+                    "ship software faster",
+                    "reduce tooling overhead"
+                  ],
+                  "friction": [],
+                  "content_angle": "Show how AI-powered IDE helps students and engineering students ship."
+                }
+              ],
+              "positioning_gaps": [],
+              "competitor_observations": [
+                "Jasper: AI marketing content platform for enterprise teams",
+                "Copy.ai: AI GTM platform for go-to-market teams"
+              ],
+              "recommended_focus": [
+                "Establish Build and Ship with Ease as the developer-first promise."
+              ],
+              "research_project_id": null,
+              "provider": "",
+              "provider_status": "",
+              "findings_created": 0,
+              "sources_created": 0,
+              "findings": [],
+              "category_coverage": [],
+              "gaps": [],
+              "unresolved_questions": [],
+              "cost": {},
+              "limits": {},
+              "stop_reason": "",
+              "iterations": 0
+            }
+          },
+          "strategy-1": {
+            "agent": "strategy",
+            "output": {
+              "summary": "Planned 4 content slot(s) across 1 channel(s) over 14 day(s).",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile+pillars",
+              "confidence": 0.6,
+              "warnings": [],
+              "requires_human_review": true,
+              "campaign_name": "Crusor AI \u2014 Product launch",
+              "objective": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+              "messaging_pillars": [
+                "Product",
+                "Developer stories",
+                "Education"
+              ],
+              "channel_mix": [
+                "linkedin"
+              ],
+              "content_plan": [
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product: Build and Ship with Ease",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Developer stories",
+                  "angle": "Developer stories deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Education",
+                  "angle": "Education deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                },
+                {
+                  "platform": "linkedin",
+                  "format": "text_post",
+                  "pillar": "Product",
+                  "angle": "Product deep-dive",
+                  "hook": "AI-powered IDE for software developers"
+                }
+              ],
+              "success_metrics": [
+                "Content approval turnaround (hours)",
+                "Publishing cadence adherence (%)",
+                "Engagement rate (measured, once connectors are live)"
+              ],
+              "risks": [
+                "No analytics connector configured: performance cannot be measured yet.",
+                "All claims must stay within the brand's approved factual envelope."
+              ]
+            }
+          },
+          "content-1": {
+            "agent": "content",
+            "output": {
+              "summary": "Mock linkedin social_post composed from the Phase 3A template bank (234 chars). Deterministic and non-billable.",
+              "generation_mode": "mock",
+              "data_source": "content_provider:mock",
+              "confidence": 0.55,
+              "warnings": [
+                "Draft composed by the deterministic mock provider, not by a language model."
+              ],
+              "requires_human_review": true,
+              "platform": "linkedin",
+              "headline": "Most developer tools optimise the wrong thing.",
+              "body": "Most developer tools optimise for the first run.\n\nThe run that actually matters is the tenth, when you are mid-change and out of patience.\n\nProduct: Build and Ship with Ease\n\nThat is the workflow we are building AI-powered IDE around.",
+              "hashtags": [
+                "#AIdev",
+                "#DevTools",
+                "#BuildAndShip"
+              ],
+              "call_to_action": "Curious how other teams handle this \u2014 reply if you have a strong opinion.",
+              "character_count": 234,
+              "detected_claims": [],
+              "content_type": "social_post",
+              "hook": "Most developer tools optimise the wrong thing.",
+              "campaign_id": "",
+              "objective": "",
+              "audience": "software developers, students and engineering students",
+              "pillar": "Product",
+              "primary_message": "Product: Build and Ship with Ease",
+              "outline": [],
+              "source_refs": [],
+              "brand_facts_used": [
+                {
+                  "statement": "Product: AI-powered IDE",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Company: Crusor AI",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                },
+                {
+                  "statement": "Tagline: Build and Ship with Ease",
+                  "verification_status": "verified",
+                  "source": "brand_profile"
+                }
+              ],
+              "verification_status": "verified",
+              "restricted_claims": [
+                "customer testimonials",
+                "user counts",
+                "performance benchmarks",
+                "pricing",
+                "competitor comparisons",
+                "integrations",
+                "launch dates",
+                "product availability"
+              ],
+              "suggested_date": "",
+              "suggested_time": "",
+              "variant_index": 0,
+              "provider": "mock",
+              "model": "mock-content-v1",
+              "is_mock": true,
+              "generation_metadata": {
+                "variant_index": 0,
+                "variant_seed": 0,
+                "platform_spec": {
+                  "body_max_chars": 2600,
+                  "hashtag_max": 3
+                },
+                "generation_mode": "mock",
+                "provider": "mock",
+                "model": "mock-content-v1",
+                "is_mock": true
+              }
+            }
+          },
+          "creative-1": {
+            "agent": "creative",
+            "output": {
+              "summary": "Creative brief prepared for linkedin carousel.",
+              "generation_mode": "deterministic",
+              "data_source": "brand_profile.visual_direction",
+              "confidence": 0.7,
+              "warnings": [],
+              "requires_human_review": true,
+              "brief": {
+                "concept": "Product",
+                "composition": [
+                  "Dark charcoal canvas, generous negative space",
+                  "Headline top-left, product context bottom-right",
+                  "Single metallic accent line as visual anchor"
+                ],
+                "palette": {
+                  "background": "#0A0A0B",
+                  "surface": "#141416",
+                  "primary_text": "#E8E8EA",
+                  "accent": "#8B5CF6",
+                  "metallic": "#C0C0C8"
+                },
+                "typography": [
+                  "Geometric sans, tight tracking, two weights maximum"
+                ],
+                "motion_notes": [
+                  "Static frame; if animated, 200ms ease-out on the accent line subject"
+                ],
+                "negative_prompt": [
+                  "no fabricated product screenshots",
+                  "no invented customer logos",
+                  "no stock-photo people",
+                  "no percentage or benchmark overlays"
+                ],
+                "aspect_ratio": "4:5"
+              },
+              "image_generation_available": true,
+              "provider_status": "mock: the deterministic mock provider is active. No image or video model is called and nothing is billed.",
+              "director_brief": null
+            }
+          },
+          "growth-1": {
+            "agent": "growth_analyst",
+            "output": {
+              "summary": "No analytics snapshots in the selected window. No performance conclusions can be drawn yet.",
+              "generation_mode": "deterministic",
+              "data_source": "none",
+              "confidence": 0.85,
+              "warnings": [
+                "Analytics unavailable: results are a measurement plan, not an assessment."
+              ],
+              "requires_human_review": true,
+              "measured": {
+                "window_days": 30,
+                "snapshots": 0
+              },
+              "observations": [
+                "No published-post metrics have been collected.",
+                "No platform analytics connector is configured."
+              ],
+              "recommendations": [
+                {
+                  "action": "Instrument the publishing pipeline before optimising.",
+                  "rationale": "Optimisation without measurement is guesswork.",
+                  "expected_effect": "Enables attributable, per-post performance data.",
+                  "confidence": 0.9
+                }
+              ],
+              "measurement_plan": [
+                "Link at least one social account and complete OAuth.",
+                "Enable the analytics collector (Phase 2) to write analytics_snapshots.",
+                "Define the primary KPI on the campaign before publishing."
+              ]
+            }
+          }
+        },
+        "checkpoint_count": 26
+      }
+    }
+  ],
+  "workflow_id": "wf_7782a6ae_ab2dc4dc04_95edd0",
+  "summary": {
+    "status": "completed",
+    "lifecycle_stage": "handed_off",
+    "phase": "completed",
+    "awaiting_human": false,
+    "iteration": 6,
+    "checkpoint_count": 26,
+    "strategy_id": null,
+    "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
+    "content_item_ids": [
+      "8b368d01-661d-4f26-aa30-03c527659d1d"
+    ],
+    "schedule_plan": [],
+    "schedule_blocked": [
+      {
+        "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+        "platform": "linkedin",
+        "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
+      }
+    ],
+    "scheduled_post_ids": [],
+    "publish_results": {
+      "published": [],
+      "failed": [],
+      "deferred": [],
+      "detail": "0 post(s) left to the scheduler; the founder did not ask for immediate publication."
+    },
+    "analytics": {
+      "available": false,
+      "ingested": 0,
+      "skipped": 0,
+      "unavailable": [
+        {
+          "platform": "all",
+          "reason": "token vault is disabled (TOKEN_VAULT_BACKEND=none); OAuth connections are unavailable"
+        }
+      ],
+      "detail": "Analytics ingestion is disabled: no credential vault."
+    },
+    "optimizations": [],
+    "optimization_note": "No measured performance is available yet, so no optimisation was proposed. Performance is read from the platform APIs; it is never inferred.",
+    "qa_verdict": "pass",
+    "trace": [
+      "intake",
+      "context_loaded",
+      "plan_created",
+      "task_dispatched",
+      "agent_completed",
+      "task_dispatched",
+      "agent_completed",
+      "task_dispatched",
+      "agent_completed",
+      "task_dispatched",
+      "agent_completed",
+      "task_dispatched",
+      "agent_completed",
+      "dispatch_complete",
+      "review_completed",
+      "campaign_reused",
+      "drafts_persisted",
+      "approval_requested",
+      "human_decision_received",
+      "decision_applied",
+      "content_scheduled",
+      "publish_attempted",
+      "analytics_read",
+      "optimisation_skipped",
+      "finalized"
+    ],
+    "errors": [
+      {
+        "at": "2026-11-04T15:39:44.126819+00:00",
+        "stage": "schedule",
+        "code": "blocked",
+        "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
+        "platform": "linkedin"
+      }
+    ],
+    "results": {
+      "research-1": {
+        "agent": "research",
+        "output": {
+          "summary": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+          "generation_mode": "deterministic",
+          "data_source": "brand_profile+goals+competitors",
+          "confidence": 0.62,
+          "warnings": [
+            "No marketing goals defined; research focus is unconstrained."
+          ],
+          "requires_human_review": true,
+          "audience_insights": [
+            {
+              "segment": "software developers",
+              "motivation": [
+                "ship software faster",
+                "reduce tooling overhead"
+              ],
+              "friction": [
+                "context switching between tools",
+                "slow feedback loops"
+              ],
+              "content_angle": "Show how AI-powered IDE helps software developers ship."
+            },
+            {
+              "segment": "students and engineering students",
+              "motivation": [
+                "ship software faster",
+                "reduce tooling overhead"
+              ],
+              "friction": [],
+              "content_angle": "Show how AI-powered IDE helps students and engineering students ship."
+            }
+          ],
+          "positioning_gaps": [],
+          "competitor_observations": [
+            "Jasper: AI marketing content platform for enterprise teams",
+            "Copy.ai: AI GTM platform for go-to-market teams"
+          ],
+          "recommended_focus": [
+            "Establish Build and Ship with Ease as the developer-first promise."
+          ],
+          "research_project_id": null,
+          "provider": "",
+          "provider_status": "",
+          "findings_created": 0,
+          "sources_created": 0,
+          "findings": [],
+          "category_coverage": [],
+          "gaps": [],
+          "unresolved_questions": [],
+          "cost": {},
+          "limits": {},
+          "stop_reason": "",
+          "iterations": 0
+        }
+      },
+      "strategy-1": {
+        "agent": "strategy",
+        "output": {
+          "summary": "Planned 4 content slot(s) across 1 channel(s) over 14 day(s).",
+          "generation_mode": "deterministic",
+          "data_source": "brand_profile+pillars",
+          "confidence": 0.6,
+          "warnings": [],
+          "requires_human_review": true,
+          "campaign_name": "Crusor AI \u2014 Product launch",
+          "objective": "Analysed 2 audience segment(s) and 2 competitor profile(s) for Crusor AI.",
+          "messaging_pillars": [
+            "Product",
+            "Developer stories",
+            "Education"
+          ],
+          "channel_mix": [
+            "linkedin"
+          ],
+          "content_plan": [
+            {
+              "platform": "linkedin",
+              "format": "text_post",
+              "pillar": "Product",
+              "angle": "Product: Build and Ship with Ease",
+              "hook": "AI-powered IDE for software developers"
+            },
+            {
+              "platform": "linkedin",
+              "format": "text_post",
+              "pillar": "Developer stories",
+              "angle": "Developer stories deep-dive",
+              "hook": "AI-powered IDE for software developers"
+            },
+            {
+              "platform": "linkedin",
+              "format": "text_post",
+              "pillar": "Education",
+              "angle": "Education deep-dive",
+              "hook": "AI-powered IDE for software developers"
+            },
+            {
+              "platform": "linkedin",
+              "format": "text_post",
+              "pillar": "Product",
+              "angle": "Product deep-dive",
+              "hook": "AI-powered IDE for software developers"
+            }
+          ],
+          "success_metrics": [
+            "Content approval turnaround (hours)",
+            "Publishing cadence adherence (%)",
+            "Engagement rate (measured, once connectors are live)"
+          ],
+          "risks": [
+            "No analytics connector configured: performance cannot be measured yet.",
+            "All claims must stay within the brand's approved factual envelope."
+          ]
+        }
+      },
+      "content-1": {
+        "agent": "content",
+        "output": {
+          "summary": "Mock linkedin social_post composed from the Phase 3A template bank (234 chars). Deterministic and non-billable.",
+          "generation_mode": "mock",
+          "data_source": "content_provider:mock",
+          "confidence": 0.55,
+          "warnings": [
+            "Draft composed by the deterministic mock provider, not by a language model."
+          ],
+          "requires_human_review": true,
+          "platform": "linkedin",
+          "headline": "Most developer tools optimise the wrong thing.",
+          "body": "Most developer tools optimise for the first run.\n\nThe run that actually matters is the tenth, when you are mid-change and out of patience.\n\nProduct: Build and Ship with Ease\n\nThat is the workflow we are building AI-powered IDE around.",
+          "hashtags": [
+            "#AIdev",
+            "#DevTools",
+            "#BuildAndShip"
+          ],
+          "call_to_action": "Curious how other teams handle this \u2014 reply if you have a strong opinion.",
+          "character_count": 234,
+          "detected_claims": [],
+          "content_type": "social_post",
+          "hook": "Most developer tools optimise the wrong thing.",
+          "campaign_id": "",
+          "objective": "",
+          "audience": "software developers, students and engineering students",
+          "pillar": "Product",
+          "primary_message": "Product: Build and Ship with Ease",
+          "outline": [],
+          "source_refs": [],
+          "brand_facts_used": [
+            {
+              "statement": "Product: AI-powered IDE",
+              "verification_status": "verified",
+              "source": "brand_profile"
+            },
+            {
+              "statement": "Company: Crusor AI",
+              "verification_status": "verified",
+              "source": "brand_profile"
+            },
+            {
+              "statement": "Tagline: Build and Ship with Ease",
+              "verification_status": "verified",
+              "source": "brand_profile"
+            }
+          ],
+          "verification_status": "verified",
+          "restricted_claims": [
+            "customer testimonials",
+            "user counts",
+            "performance benchmarks",
+            "pricing",
+            "competitor comparisons",
+            "integrations",
+            "launch dates",
+            "product availability"
+          ],
+          "suggested_date": "",
+          "suggested_time": "",
+          "variant_index": 0,
+          "provider": "mock",
+          "model": "mock-content-v1",
+          "is_mock": true,
+          "generation_metadata": {
+            "variant_index": 0,
+            "variant_seed": 0,
+            "platform_spec": {
+              "body_max_chars": 2600,
+              "hashtag_max": 3
+            },
+            "generation_mode": "mock",
+            "provider": "mock",
+            "model": "mock-content-v1",
+            "is_mock": true
+          }
+        }
+      },
+      "creative-1": {
+        "agent": "creative",
+        "output": {
+          "summary": "Creative brief prepared for linkedin carousel.",
+          "generation_mode": "deterministic",
+          "data_source": "brand_profile.visual_direction",
+          "confidence": 0.7,
+          "warnings": [],
+          "requires_human_review": true,
+          "brief": {
+            "concept": "Product",
+            "composition": [
+              "Dark charcoal canvas, generous negative space",
+              "Headline top-left, product context bottom-right",
+              "Single metallic accent line as visual anchor"
+            ],
+            "palette": {
+              "background": "#0A0A0B",
+              "surface": "#141416",
+              "primary_text": "#E8E8EA",
+              "accent": "#8B5CF6",
+              "metallic": "#C0C0C8"
+            },
+            "typography": [
+              "Geometric sans, tight tracking, two weights maximum"
+            ],
+            "motion_notes": [
+              "Static frame; if animated, 200ms ease-out on the accent line subject"
+            ],
+            "negative_prompt": [
+              "no fabricated product screenshots",
+              "no invented customer logos",
+              "no stock-photo people",
+              "no percentage or benchmark overlays"
+            ],
+            "aspect_ratio": "4:5"
+          },
+          "image_generation_available": true,
+          "provider_status": "mock: the deterministic mock provider is active. No image or video model is called and nothing is billed.",
+          "director_brief": null
+        }
+      },
+      "growth-1": {
+        "agent": "growth_analyst",
+        "output": {
+          "summary": "No analytics snapshots in the selected window. No performance conclusions can be drawn yet.",
+          "generation_mode": "deterministic",
+          "data_source": "none",
+          "confidence": 0.85,
+          "warnings": [
+            "Analytics unavailable: results are a measurement plan, not an assessment."
+          ],
+          "requires_human_review": true,
+          "measured": {
+            "window_days": 30,
+            "snapshots": 0
+          },
+          "observations": [
+            "No published-post metrics have been collected.",
+            "No platform analytics connector is configured."
+          ],
+          "recommendations": [
+            {
+              "action": "Instrument the publishing pipeline before optimising.",
+              "rationale": "Optimisation without measurement is guesswork.",
+              "expected_effect": "Enables attributable, per-post performance data.",
+              "confidence": 0.9
+            }
+          ],
+          "measurement_plan": [
+            "Link at least one social account and complete OAuth.",
+            "Enable the analytics collector (Phase 2) to write analytics_snapshots.",
+            "Define the primary KPI on the campaign before publishing."
+          ]
+        }
+      }
+    }
+  },
+  "checks": [
+    {
+      "check": "approval_was_required",
+      "ok": true,
+      "detail": "the workflow halted before creating anything externally"
+    },
+    {
+      "check": "trace_is_recorded",
+      "ok": true,
+      "detail": "25 trace entries: intake, context_loaded, plan_created, task_dispatched, agent_completed, task_dispatched, agent_completed, task_dispatched, agent_completed, task_dispatched, agent_completed, task_dispatched"
+    },
+    {
+      "check": "no_fabricated_publication",
+      "ok": true,
+      "detail": "0 published with external ids, 0 blocked"
+    },
+    {
+      "check": "analytics_are_measured_or_absent",
+      "ok": true,
+      "detail": "{\"available\": false, \"ingested\": 0, \"skipped\": 0, \"unavailable\": [{\"platform\": \"all\", \"reason\": \"token vault is disabled (TOKEN_VAULT_BACKEND=none); OAuth connections are unavailable\"}], \"detail\": \"Analytics ingestion is disabled: no credential vault.\"}"
+    },
+    {
+      "check": "state_is_durable",
+      "ok": true,
+      "detail": "26 checkpoints persisted"
+    },
+    {
+      "check": "editor_cannot_approve",
+      "ok": true,
+      "detail": "editor decision refused with HTTP 401"
+    },
+    {
+      "check": "repeat_approval_changes_nothing",
+      "ok": true,
+      "detail": "second approval returned HTTP 200; stage handed_off, scheduled posts 0, state unchanged=True"
+    }
+  ],
+  "api_calls": [
+    {
+      "at": "2026-11-04T15:39:43+00:00",
+      "method": "GET",
+      "path": "/api/v1/system/health",
+      "status": 200,
+      "ms": 2.7
+    },
+    {
+      "at": "2026-11-04T15:39:43+00:00",
+      "method": "POST",
+      "path": "/api/v1/auth/token",
+      "status": 200,
+      "ms": 284.0
+    },
+    {
+      "at": "2026-11-04T15:39:43+00:00",
+      "method": "GET",
+      "path": "/api/v1/system/status",
+      "status": 200,
+      "ms": 8.4
+    },
+    {
+      "at": "2026-11-04T15:39:43+00:00",
+      "method": "GET",
+      "path": "/api/v1/brand/active",
+      "status": 200,
+      "ms": 9.5
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "POST",
+      "path": "/api/v1/director/workflows",
+      "status": 201,
+      "ms": 383.2
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "GET",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0",
+      "status": 200,
+      "ms": 40.7
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "POST",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0/decision",
+      "status": 200,
+      "ms": 209.4
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "POST",
+      "path": "/api/v1/auth/users",
+      "status": 422,
+      "ms": 7.5
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "POST",
+      "path": "/api/v1/director/workflows",
+      "status": 201,
+      "ms": 372.7
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "POST",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0/decision",
+      "status": 200,
+      "ms": 58.7
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "GET",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0",
+      "status": 200,
+      "ms": 32.4
+    },
+    {
+      "at": "2026-11-04T15:39:44+00:00",
+      "method": "POST",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_2f52fe1807_fbab67/cancel",
+      "status": 200,
+      "ms": 80.2
+    }
+  ],
+  "result": "pass"
+}

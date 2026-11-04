@@ -1,0 +1,603 @@
+{
+  "generated_at": "2026-11-04T15:40:09+00:00",
+  "providers": [
+    {
+      "provider": "facebook",
+      "label": "Facebook Page",
+      "kind": "social",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: meta_app_id, meta_app_secret",
+        "oauth_config: TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+        "network: GET https://graph.facebook.com/ failed after 57 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: meta_app_id, meta_app_secret",
+          "missing": [
+            "meta_app_id",
+            "meta_app_secret"
+          ]
+        },
+        {
+          "stage": "oauth_config",
+          "status": "blocked",
+          "detail": "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+          "problems": [
+            "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange"
+          ]
+        },
+        {
+          "stage": "publishing_gate",
+          "status": "info",
+          "detail": "PUBLISHING_ENABLED=false \u2014 publishing is refused before any network call"
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "authorize ['graph.facebook.com'] /me read; scopes pages_manage_posts, pages_read_engagement, read_insights"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://graph.facebook.com/ failed after 57 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "google_ads",
+      "label": "Google Ads API",
+      "kind": "ads",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+        "network: GET https://googleads.googleapis.com/ failed after 23 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: not configured: Google Ads needs GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN and GOOGLE_ADS_LOGIN_CUSTOMER_ID (the customer id with billing). Without all three the transport reports unavailable."
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+          "missing": [
+            "GOOGLE_ADS_ACCESS_TOKEN",
+            "GOOGLE_ADS_DEVELOPER_TOKEN",
+            "GOOGLE_ADS_LOGIN_CUSTOMER_ID"
+          ]
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "v17 \u2192 https://googleads.googleapis.com/v17; available=False; reason=Google Ads needs GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN and GOOGLE_ADS_LOGIN_CUSTOMER_ID (the customer id with billing). Without all three the transport reports unavailable.",
+          "request_shape": {
+            "platform": "google_ads",
+            "implemented": true,
+            "credentials_configured": false,
+            "available": false,
+            "verification": "unverified",
+            "reason": "Google Ads needs GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN and GOOGLE_ADS_LOGIN_CUSTOMER_ID (the customer id with billing). Without all three the transport reports unavailable.",
+            "docs_url": "https://developers.google.com/google-ads/api/docs/start",
+            "api_version": "v17"
+          }
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://googleads.googleapis.com/ failed after 23 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "not configured: Google Ads needs GOOGLE_ADS_ACCESS_TOKEN, GOOGLE_ADS_DEVELOPER_TOKEN and GOOGLE_ADS_LOGIN_CUSTOMER_ID (the customer id with billing). Without all three the transport reports unavailable."
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "instagram",
+      "label": "Instagram Business",
+      "kind": "social",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: meta_app_id, meta_app_secret",
+        "oauth_config: TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+        "network: GET https://graph.facebook.com/ failed after 84 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: meta_app_id, meta_app_secret",
+          "missing": [
+            "meta_app_id",
+            "meta_app_secret"
+          ]
+        },
+        {
+          "stage": "oauth_config",
+          "status": "blocked",
+          "detail": "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+          "problems": [
+            "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange"
+          ]
+        },
+        {
+          "stage": "publishing_gate",
+          "status": "info",
+          "detail": "PUBLISHING_ENABLED=false \u2014 publishing is refused before any network call"
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "authorize ['graph.facebook.com'] /me read; scopes instagram_basic, instagram_content_publish, instagram_manage_insights, pages_show_list"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://graph.facebook.com/ failed after 84 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "linkedin",
+      "label": "LinkedIn",
+      "kind": "social",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: linkedin_client_id, linkedin_client_secret",
+        "oauth_config: TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+        "network: GET https://api.linkedin.com/ failed after 21 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992); GET https://www.linkedin.com/ failed after 46 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: linkedin_client_id, linkedin_client_secret",
+          "missing": [
+            "linkedin_client_id",
+            "linkedin_client_secret"
+          ]
+        },
+        {
+          "stage": "oauth_config",
+          "status": "blocked",
+          "detail": "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+          "problems": [
+            "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange"
+          ]
+        },
+        {
+          "stage": "publishing_gate",
+          "status": "info",
+          "detail": "PUBLISHING_ENABLED=false \u2014 publishing is refused before any network call"
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "authorize ['api.linkedin.com', 'www.linkedin.com'] /me read; scopes w_member_social, r_liteprofile, r_organization_social, rw_organization_admin"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://api.linkedin.com/ failed after 21 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992); GET https://www.linkedin.com/ failed after 46 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "linkedin_ads",
+      "label": "LinkedIn Marketing API",
+      "kind": "ads",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: LINKEDIN_ADS_ACCESS_TOKEN, LINKEDIN_ADS_ACCOUNT_URN",
+        "network: GET https://api.linkedin.com/ failed after 40 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: not configured: LinkedIn Ads needs LINKEDIN_ADS_ACCESS_TOKEN and LINKEDIN_ADS_ACCOUNT_URN, plus an app approved for the Advertising API. Without them the transport is unavailable."
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: LINKEDIN_ADS_ACCESS_TOKEN, LINKEDIN_ADS_ACCOUNT_URN",
+          "missing": [
+            "LINKEDIN_ADS_ACCESS_TOKEN",
+            "LINKEDIN_ADS_ACCOUNT_URN"
+          ]
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "202405 \u2192 https://api.linkedin.com/rest; available=False; reason=LinkedIn Ads needs LINKEDIN_ADS_ACCESS_TOKEN and LINKEDIN_ADS_ACCOUNT_URN, plus an app approved for the Advertising API. Without them the transport is unavailable.",
+          "request_shape": {
+            "platform": "linkedin_ads",
+            "implemented": true,
+            "credentials_configured": false,
+            "available": false,
+            "verification": "unverified",
+            "reason": "LinkedIn Ads needs LINKEDIN_ADS_ACCESS_TOKEN and LINKEDIN_ADS_ACCOUNT_URN, plus an app approved for the Advertising API. Without them the transport is unavailable.",
+            "docs_url": "https://learn.microsoft.com/en-us/linkedin/marketing/",
+            "api_version": "202405"
+          }
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://api.linkedin.com/ failed after 40 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "not configured: LinkedIn Ads needs LINKEDIN_ADS_ACCESS_TOKEN and LINKEDIN_ADS_ACCOUNT_URN, plus an app approved for the Advertising API. Without them the transport is unavailable."
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "meta_ads",
+      "label": "Meta Marketing API",
+      "kind": "ads",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: META_ADS_ACCESS_TOKEN, META_ADS_ACCOUNT_ID",
+        "network: GET https://graph.facebook.com/ failed after 20 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: not configured: Meta Marketing API needs META_ADS_ACCESS_TOKEN and META_ADS_ACCOUNT_ID; POST /ads/transports reports this as unavailable until both exist."
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: META_ADS_ACCESS_TOKEN, META_ADS_ACCOUNT_ID",
+          "missing": [
+            "META_ADS_ACCESS_TOKEN",
+            "META_ADS_ACCOUNT_ID"
+          ]
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "v21.0 \u2192 https://graph.facebook.com/v21.0; available=False; reason=Meta Marketing API needs META_ADS_ACCESS_TOKEN and META_ADS_ACCOUNT_ID; POST /ads/transports reports this as unavailable until both exist.",
+          "request_shape": {
+            "platform": "meta_ads",
+            "implemented": true,
+            "credentials_configured": false,
+            "available": false,
+            "verification": "unverified",
+            "reason": "Meta Marketing API needs META_ADS_ACCESS_TOKEN and META_ADS_ACCOUNT_ID; POST /ads/transports reports this as unavailable until both exist.",
+            "docs_url": "https://developers.facebook.com/docs/marketing-apis",
+            "api_version": "v21.0"
+          }
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://graph.facebook.com/ failed after 20 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "not configured: Meta Marketing API needs META_ADS_ACCESS_TOKEN and META_ADS_ACCOUNT_ID; POST /ads/transports reports this as unavailable until both exist."
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "openai_image",
+      "label": "OpenAI Images",
+      "kind": "creative",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: OPENAI_API_KEY",
+        "network: GET https://api.openai.com/ failed after 20 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: missing: OPENAI_API_KEY"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: OPENAI_API_KEY",
+          "missing": [
+            "OPENAI_API_KEY"
+          ]
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "model gpt-image-1; sizes 1024x1024, 1536x1024, 1024x1536"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://api.openai.com/ failed after 20 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "missing: OPENAI_API_KEY"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "reddit",
+      "label": "Reddit",
+      "kind": "social",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: reddit_client_id, reddit_client_secret",
+        "oauth_config: TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+        "network: GET https://oauth.reddit.com/ failed after 29 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992); GET https://www.reddit.com/ failed after 30 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: reddit_client_id, reddit_client_secret",
+          "missing": [
+            "reddit_client_id",
+            "reddit_client_secret"
+          ]
+        },
+        {
+          "stage": "oauth_config",
+          "status": "blocked",
+          "detail": "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+          "problems": [
+            "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange"
+          ]
+        },
+        {
+          "stage": "publishing_gate",
+          "status": "info",
+          "detail": "PUBLISHING_ENABLED=false \u2014 publishing is refused before any network call"
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "authorize ['oauth.reddit.com', 'www.reddit.com'] /me read; scopes identity, submit, read, flair"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://oauth.reddit.com/ failed after 29 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992); GET https://www.reddit.com/ failed after 30 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "replicate_video",
+      "label": "Replicate video",
+      "kind": "creative",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL",
+        "network: GET https://api.replicate.com/ failed after 30 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: missing: REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL",
+          "missing": [
+            "REPLICATE_API_TOKEN",
+            "REPLICATE_VIDEO_MODEL"
+          ]
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "a pinned owner/model:version is required; an unpinned model is refused"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://api.replicate.com/ failed after 30 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "missing: REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "x",
+      "label": "X",
+      "kind": "social",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: x_client_id, x_client_secret",
+        "oauth_config: TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+        "network: GET https://api.twitter.com/ failed after 50 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: x_client_id, x_client_secret",
+          "missing": [
+            "x_client_id",
+            "x_client_secret"
+          ]
+        },
+        {
+          "stage": "oauth_config",
+          "status": "blocked",
+          "detail": "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+          "problems": [
+            "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange"
+          ]
+        },
+        {
+          "stage": "publishing_gate",
+          "status": "info",
+          "detail": "PUBLISHING_ENABLED=false \u2014 publishing is refused before any network call"
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "authorize ['api.twitter.com'] /me read; scopes tweet.read, tweet.write, users.read, offline.access"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://api.twitter.com/ failed after 50 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    },
+    {
+      "provider": "youtube",
+      "label": "YouTube",
+      "kind": "social",
+      "status": "blocked",
+      "blocked_by": [
+        "credentials: missing: google_client_id, google_client_secret",
+        "oauth_config: TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+        "network: GET https://oauth2.googleapis.com/ failed after 23 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992); GET https://www.googleapis.com/ failed after 22 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+        "live: a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+      ],
+      "stages": [
+        {
+          "stage": "credentials",
+          "status": "blocked",
+          "detail": "missing: google_client_id, google_client_secret",
+          "missing": [
+            "google_client_id",
+            "google_client_secret"
+          ]
+        },
+        {
+          "stage": "oauth_config",
+          "status": "blocked",
+          "detail": "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange",
+          "problems": [
+            "TOKEN_VAULT_BACKEND=none \u2014 a token cannot be stored after the exchange"
+          ]
+        },
+        {
+          "stage": "publishing_gate",
+          "status": "info",
+          "detail": "PUBLISHING_ENABLED=false \u2014 publishing is refused before any network call"
+        },
+        {
+          "stage": "preview",
+          "status": "info",
+          "detail": "authorize ['oauth2.googleapis.com', 'www.googleapis.com'] /me read; scopes https://www.googleapis.com/auth/youtube.upload, https://www.googleapis.com/auth/youtube.readonly, https://www.googleapis.com/auth/yt-analytics.readonly"
+        },
+        {
+          "stage": "network",
+          "status": "blocked",
+          "detail": "GET https://oauth2.googleapis.com/ failed after 23 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992); GET https://www.googleapis.com/ failed after 22 ms \u2014 ConnectError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)"
+        },
+        {
+          "stage": "live",
+          "status": "blocked",
+          "detail": "a social canary needs a connected account and runs through the API: set CANARY_API_BASE and CANARY_API_TOKEN (a founder/service token), and connect the account with POST /social/oauth/{platform}/start first"
+        },
+        {
+          "stage": "evidence",
+          "status": "info",
+          "sandbox_verified": "no",
+          "production_verified": "no",
+          "detail": "no live call has succeeded for this provider"
+        }
+      ]
+    }
+  ]
+}

@@ -1,29 +1,44 @@
 # 25 — Platform readiness and founder checklist
 
-Generated 2026-11-04T13:29:57+00:00 from code + the current environment (`ENVIRONMENT=development`).
+Generated 2026-11-04T15:37:10+00:00 from code + the current environment (`ENVIRONMENT=development`).
 
-**How to read the columns.** `implemented` is what the code does. `mock-tested` means an automated suite exercises it against `httpx.MockTransport`. `sandbox-verified` and `production-verified` can only be filled by a real call against a real developer account — this repository has not made one, so both are `no` for every row. A feature is not production-ready because its code exists.
+**How to read the columns.** `implemented` is what the code does. `mock-tested` means an automated suite exercises it against `httpx.MockTransport`. `credential-configured` is only about presence: the environment variables exist *and* the OAuth prerequisites below are met; it is not evidence that a provider accepted them. `sandbox-verified` and `production-verified` can only be filled by a real call against a real developer account, so both are `no` for every row until one is recorded in `docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because its code exists.
+
+## OAuth prerequisites
+
+- `OAUTH_REDIRECT_BASE_URL`: http://localhost:8000
+- Token vault: backend `none`, key MISSING
+- `PUBLISHING_ENABLED`: False
+
+Every provider also requires its own OAuth app review, and the redirect above
+must be registered in that app. Sharing one app's credentials across providers
+is not supported anywhere in this codebase.
 
 ## Six platforms
 
-| Platform | Implemented | Mock-tested | Sandbox-verified | Production-verified |
-| --- | --- | --- | --- | --- |
-| Facebook Page | yes | yes (httpx.MockTransport suites) | no | no |
-| Instagram Business | yes | yes (httpx.MockTransport suites) | no | no |
-| LinkedIn Page | yes | yes (httpx.MockTransport suites) | no | no |
-| X (Twitter) | yes | yes (httpx.MockTransport suites) | no | no |
-| YouTube | yes | yes (httpx.MockTransport suites) | no | no |
-| Reddit | yes | yes (httpx.MockTransport suites) | no | no |
+| Platform | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified |
+| --- | --- | --- | --- | --- | --- |
+| Facebook Page | yes | yes (httpx.MockTransport suites) | no | no | no |
+| Instagram Business | yes | yes (httpx.MockTransport suites) | no | no | no |
+| LinkedIn Page | yes | yes (httpx.MockTransport suites) | no | no | no |
+| X (Twitter) | yes | yes (httpx.MockTransport suites) | no | no | no |
+| YouTube | yes | yes (httpx.MockTransport suites) | no | no | no |
+| Reddit | yes | yes (httpx.MockTransport suites) | no | no | no |
 
 ## Paid media
 
-| Platform | API | Implemented | Credentials present | Mock-tested | Sandbox-verified | Production-verified |
-| --- | --- | --- | --- | --- | --- | --- |
-| Meta Marketing API | Graph v21.0 | yes | no | yes (httpx.MockTransport suites) | no | no |
-| Google Ads API | REST v17 | yes | no | yes (httpx.MockTransport suites) | no | no |
-| LinkedIn Ads API | 202405 | yes | no | yes (httpx.MockTransport suites) | no | no |
+| Platform | API | Implemented | Credential-configured | Sandbox-verified | Production-verified |
+| --- | --- | --- | --- | --- | --- |
+| Meta Marketing API | Graph v21.0 | yes | no | no | no |
+| Google Ads API | REST v17 | yes | no | no | no |
+| LinkedIn Ads API | 202405 | yes | no | no | no |
 
 ## Creative generation
+
+| Provider | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified | Blocked by |
+| --- | --- | --- | --- | --- | --- | --- |
+| OpenAI Images | yes | yes (httpx.MockTransport suites) | no | no | no | missing OPENAI_API_KEY, price not pinned in CREATIVE_PRICING_JSON, CREATIVE_CAMPAIGN_BUDGET_USD is 0, CREATIVE_ALLOW_PAID_GENERATION is not true |
+| Replicate video | yes | yes (httpx.MockTransport suites) | no | no | no | missing REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL, price not pinned in CREATIVE_PRICING_JSON, CREATIVE_CAMPAIGN_BUDGET_USD is 0, CREATIVE_ALLOW_PAID_GENERATION is not true |
 
 - Provider set: `mock`
 - State: `available` — Deterministic mock provider. No model or external service is called, and video requests produce a poster frame rather than an encoded video.

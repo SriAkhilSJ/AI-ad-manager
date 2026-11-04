@@ -16,12 +16,14 @@ structlog==24.4.0
 langgraph==0.2.62
 langchain-core==0.3.28
 celery==5.4.0
-# kombu (Celery's messaging layer) drives Redis through the redis-py client, and
-# its transport is only exercised against the 5.0 line. 5.2.x changed connection
-# internals the transport still relies on, which shows up as an instant
-# OperationalError the moment a worker inspects the broker — invisible in unit
-# tests, fatal in CI. Pinned to the version the transport is tested against;
-# raise it only together with a broker round-trip in CI.
+# kombu and redis-py must be pinned *together*. Celery 5.4.0 accepts any kombu
+# <6, so an unpinned install pulls kombu 5.7+, whose Redis transport refuses any
+# redis-py below 6.1 and dies at worker startup with:
+#   VersionMismatch('Redis transport requires redis-py versions 6.1.0 or later')
+# Unit tests never touch the transport, so this only ever appears in CI minutes.
+# 5.6.2 declares redis>=4.5.2,<6.5 and is verified against 5.0.8 here by a real
+# worker round-trip; raise either line only with .github/workflows/ci.yml green.
+kombu==5.6.2
 redis==5.0.8
 boto3==1.35.90
 

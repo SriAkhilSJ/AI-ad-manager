@@ -50,10 +50,12 @@ export function SocialAccountsPage() {
         }
       />
 
-      <Banner tone="neutral" title="Phase 1: no network publishing">
-        All six platforms are modelled, and every one reports{' '}
-        <Mono>publish_enabled: false</Mono>. Approval and scheduling are fully implemented; the
-        transport that would send a post is a Phase 2 integration.
+      <Banner tone="neutral" title="Publishing needs three things, and reports which are missing">
+        The platform's own application credentials, a configured token vault (
+        <Mono>TOKEN_VAULT_BACKEND=db</Mono> + <Mono>TOKEN_VAULT_KEY</Mono>) and a connected
+        account. Until all three exist, <Mono>publish_enabled</Mono> is false and a publish is
+        refused without touching the network. When a transport is enabled, the created post is
+        read back before anything is marked published.
       </Banner>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -90,8 +92,17 @@ export function SocialAccountsPage() {
                         {row.publish_enabled ? 'publish enabled' : 'gated'}
                       </Badge>
                       <Mono>
-                        {row.credentials_configured ? 'creds set' : 'no creds'}
+                        {row.credentials_configured ? 'creds set' : 'no creds'} ·{' '}
+                        {row.vault_available ? 'vault ok' : 'no vault'}
                       </Mono>
+                      {row.capabilities ? (
+                        <span className="hq-mono text-[10px] text-steel-600">
+                          {
+                            Object.values(row.capabilities).filter((cap) => cap.usable).length
+                          }
+                          /{Object.keys(row.capabilities).length} operations implemented
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </li>

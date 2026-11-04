@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # CI runs entirely offline: no provider keys, no platform credentials, no
+  # vault key. Every integration must therefore report `unavailable`, and the
+  # suite is written to assert exactly that.
+  ENVIRONMENT: test
+  SECRET_KEY: ci-only-secret-key-0123456789abcdef0123456789abcdef
+  DATABASE_URL: sqlite+aiosqlite:///./.data/ci.db
+  BOOTSTRAP_FOUNDER_EMAIL: founder@example.com
+  BOOTSTRAP_FOUNDER_PASSWORD: founder-ci-password
+  TASK_DISPATCHER: inline
+  STORAGE_BACKEND: local
+  FLOW_LIVE_GENERATION_ENABLED: "false"
+  CREATIVE_ALLOW_PAID_GENERATION: "false"
+  TOKEN_VAULT_BACKEND: none
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  backend:
+    name: backend — tests, migrations, audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Alembic upgrade / downgrade / upgrade
+        working-directory: backend
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./.data/ci-migrations.db
+        run: |
+          mkdir -p .data
+          alembic upgrade head
+          alembic downgrade -1
+          alembic upgrade head
+          alembic current
+
+      - name: Full test suite
+        working-directory: backend
+        run: pytest tests -p no:warnings
+
+      - name: Source audit must stay blocked
+        working-directory: backend
+        # Exit 3 / SOURCE_ABSENT is the *expected* result: the DeepX source is not
+        # in this repository and must never be vendored. Any other exit code means
+        # the gate changed and needs a human.
+        run: |
+          set +e
+          python ../scripts/flow_source_audit.py > audit.txt 2>&1
+          code=$?
+          cat audit.txt
+          test "$code" -eq 3 || { echo "audit exit code changed: $code"; exit 1; }
+          grep -q "SOURCE_ABSENT" audit.txt
+
+  frontend:
+    name: frontend — typecheck, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci || npm install
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  no-secrets:
+    name: guard — no credentials in source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject committed .env files and obvious key material
+        run: |
+          set -e
+          if git ls-files | grep -E '(^|/)\.env$'; then
+            echo "::error::a .env file is committed"; exit 1
+          fi
+          if git grep -nE '(sk-[A-Za-z0-9]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|EAA[A-Za-z0-9]{40,})' -- . ':!*.md' ':!docs' ; then
+            echo "::error::key-shaped string found in source"; exit 1
+          fi
+          echo "no credentials in source"

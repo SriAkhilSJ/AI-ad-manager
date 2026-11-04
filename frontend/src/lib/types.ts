@@ -228,12 +228,131 @@ export interface SocialAccount {
   created_at: string
 }
 
+export type CapabilityState = 'supported' | 'unsupported' | 'not_implemented'
+export type VerificationState = 'unverified' | 'sandbox' | 'production'
+
+export interface PlatformCapability {
+  documented: CapabilityState
+  implemented: boolean
+  /** Documented support AND implemented. Says nothing about live verification. */
+  usable: boolean
+  verification: VerificationState
+  note: string
+}
+
 export interface PlatformStatus {
   platform: Platform
   credentials_configured: boolean
+  vault_available: boolean
   transport_available: boolean
   publish_enabled: boolean
+  capabilities: Record<string, PlatformCapability>
   reason: string
+}
+
+export interface OAuthStart {
+  platform: Platform
+  authorize_url: string
+  state: string
+  redirect_uri: string
+  scopes: string[]
+  pkce: boolean
+  expires_in: number
+}
+
+export interface OAuthConnection {
+  platform: Platform
+  status: string
+  handle: string
+  external_account_id: string | null
+  scopes: string[]
+  expires_at: string | null
+  refreshed: boolean
+  verified: boolean
+  detail: string
+}
+
+export interface AnalyticsIngestResult {
+  requested: number
+  ingested: number
+  skipped: number
+  unavailable: { platform: string; reason: string }[]
+  detail: string
+}
+
+// ------------------------------------------------------------------- paid ads
+export type AdPlatform = 'meta_ads' | 'google_ads' | 'linkedin_ads'
+export type AdCampaignStatusValue =
+  | 'proposed'
+  | 'authorized'
+  | 'creating'
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'rejected'
+  | 'failed'
+
+export interface AdTransport {
+  platform: AdPlatform
+  implemented: boolean
+  credentials_configured: boolean
+  available: boolean
+  reason: string
+  docs_url: string
+}
+
+export interface AdCampaign {
+  id: string
+  brand_profile_id: string
+  campaign_id: string | null
+  platform: AdPlatform
+  name: string
+  objective: string
+  status: AdCampaignStatusValue
+  plan: Record<string, unknown>
+  targeting: Record<string, unknown>
+  creatives: unknown[]
+  daily_budget_cents: number
+  total_budget_cents: number
+  currency: string
+  proposal_hash: string
+  external_campaign_id: string | null
+  created_by_agent: string | null
+  created_at: string
+}
+
+export interface AdAuthorization {
+  id: string
+  ad_campaign_id: string
+  proposal_hash: string
+  max_spend_cents: number
+  allowed_operations: string[]
+  currency: string
+  status: 'active' | 'consumed' | 'revoked' | 'expired'
+  expires_at: string
+  authorized_by: string
+  consumed_at: string | null
+  note: string
+}
+
+export interface AdOperation {
+  id: string
+  ad_campaign_id: string
+  authorization_id: string | null
+  kind: string
+  outcome: 'requested' | 'refused' | 'succeeded' | 'failed' | 'unverified'
+  detail: string
+  request_fingerprint: string
+  evidence: Record<string, unknown>
+  actor_role: string
+  created_at: string
+}
+
+export interface AdCampaignDetail {
+  campaign: AdCampaign
+  operations: AdOperation[]
+  authorizations: AdAuthorization[]
+  transport: AdTransport
 }
 
 export interface PlanTask {

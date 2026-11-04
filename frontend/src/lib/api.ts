@@ -26,6 +26,15 @@ import type {
   CreativeAsset,
   GraphTopology,
   MarketingGoal,
+  AdAuthorization,
+  AdCampaign,
+  AdCampaignDetail,
+  AdOperation,
+  AdTransport,
+  AnalyticsIngestResult,
+  OAuthConnection,
+  OAuthStart,
+  PlatformCapability,
   PlatformStatus,
   PlatformSpec,
   StudioCapabilities,
@@ -436,6 +445,26 @@ export const creativeApi = {
 // ----------------------------------------------------------------- social
 export const socialApi = {
   platforms: () => request<PlatformStatus[]>('/social/platforms'),
+  capabilities: () =>
+    request<{ platforms: Record<string, Record<string, PlatformCapability>>; note: string }>(
+      '/social/capabilities',
+    ),
+  startOAuth: (platform: string, brandProfileId: string) =>
+    request<OAuthStart>(
+      `/social/oauth/${platform}/start?brand_profile_id=${brandProfileId}`,
+      { method: 'POST' },
+    ),
+  refreshAccount: (id: string) =>
+    request<OAuthConnection>(`/social/accounts/${id}/refresh`, { method: 'POST' }),
+  ingestAnalytics: (payload: {
+    brand_profile_id: string
+    platforms?: string[]
+    days?: number
+  }) =>
+    request<AnalyticsIngestResult>('/social/analytics/ingest', {
+      method: 'POST',
+      body: payload,
+    }),
   accounts: (query?: { brand_profile_id?: string }) =>
     request<SocialAccount[]>('/social/accounts', { query }),
   createAccount: (payload: {
@@ -777,4 +806,48 @@ export const creativeStudioApi = {
     }
     return response.blob()
   },
+}
+
+// -------------------------------------------------------------------- paid ads
+export const adsApi = {
+  transports: () => request<AdTransport[]>('/ads/transports'),
+  campaigns: (brandProfileId: string) =>
+    request<AdCampaign[]>('/ads/campaigns', { query: { brand_profile_id: brandProfileId } }),
+  detail: (campaignId: string) =>
+    request<AdCampaignDetail>(`/ads/campaigns/${campaignId}`),
+  propose: (payload: {
+    brand_profile_id: string
+    platform: string
+    name: string
+    objective?: string
+    plan?: Record<string, unknown>
+    targeting?: Record<string, unknown>
+    creatives?: unknown[]
+    daily_budget_cents?: number
+    total_budget_cents?: number
+    currency?: string
+  }) => request<AdCampaign>('/ads/proposals', { method: 'POST', body: payload }),
+  authorize: (
+    campaignId: string,
+    payload: {
+      max_spend_cents: number
+      allowed_operations: string[]
+      ttl_hours?: number
+      note?: string
+    },
+  ) =>
+    request<AdAuthorization>(`/ads/campaigns/${campaignId}/authorize`, {
+      method: 'POST',
+      body: payload,
+    }),
+  reject: (campaignId: string) =>
+    request<AdCampaign>(`/ads/campaigns/${campaignId}/reject`, { method: 'POST' }),
+  execute: (
+    campaignId: string,
+    payload: { kind: string; authorization_id: string; params?: Record<string, unknown> },
+  ) =>
+    request<AdOperation>(`/ads/campaigns/${campaignId}/operations`, {
+      method: 'POST',
+      body: payload,
+    }),
 }

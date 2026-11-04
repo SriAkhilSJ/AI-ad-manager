@@ -15,6 +15,8 @@ from sqlalchemy import func, select, text
 
 from app.api.deps import DB
 from app.core.config import get_settings
+from app.integrations.ads import ads_transport_report
+from app.integrations.vault import build_vault
 from app.services.flow_gateway import flow_status_payload
 from app.creative.providers import creative_provider_status
 from app.director.graph import graph_topology
@@ -134,12 +136,19 @@ async def status(session: DB) -> dict[str, Any]:
             ),
         },
         "flow": flow_status_payload(settings),
-        "publishing": {
-            "status": "unavailable",
-            "mode": "human_approval_required",
+        "publishing": _publishing_status(session, settings),
+        "ads": {
+            "status": "unavailable"
+            if not any(t["available"] for t in ads_transport_report(settings))
+            else "available",
+            "mode": "founder_authorisation_required",
+            "max_authorized_spend_cents": settings.ads_max_authorized_spend_cents,
+            "transports": ads_transport_report(settings),
             "note": (
-                "Phase 1 never publishes to a social network. Approvals and scheduling "
-                "are fully implemented; network transport is a Phase 2 integration."
+                "Paid campaigns can be drafted by an agent, but every external mutation "
+                "requires a single-use founder authorisation bound to the exact proposal "
+                "hash. No ads transport is implemented in this build, so launches are "
+                "refused and recorded rather than attempted."
             ),
         },
         "auth": {
@@ -158,3 +167,46 @@ async def status(session: DB) -> dict[str, Any]:
             "per_minute": settings.rate_limit_per_minute,
         },
     }
+
+
+def _publishing_status(session: Any, settings: Any) -> dict[str, Any]:
+    """Honest publishing readiness: credentials, vault and transport are separate."""
+    registry_ready = False
+    vault_reason = ""
+    try:
+        from app.publishing.adapters import get_adapter_registry
+
+        registry = get_adapter_registry()
+        rows = registry.availability()
+        registry_ready = any(r["publish_enabled"] for r in rows)
+        vault_reason = (
+            "" if registry.vault_available else getattr(registry, "vault_reason", "")
+        )
+        note = (
+            "Live platform transport is available for the configured platforms. Every "
+            "publish still requires a founder approval bound to the exact content version, "
+            "and the created object is read back before the post is marked published."
+            if registry_ready
+            else "No platform is publishable yet: platform application credentials and a "
+            "token vault (TOKEN_VAULT_KEY) are both required. Approval and scheduling are "
+            "fully implemented and no publish is ever simulated."
+        )
+        return {
+            "status": "available" if registry_ready else "unavailable",
+            "mode": "human_approval_required",
+            "vault": "configured" if not vault_reason else "unavailable",
+            "vault_reason": vault_reason or None,
+            "verified_before_publish": True,
+            "platforms": rows,
+            "note": note,
+        }
+    except Exception as exc:  # noqa: BLE001 - status must never 500
+        return {
+            "status": "unavailable",
+            "mode": "human_approval_required",
+            "vault": "unknown",
+            "vault_reason": type(exc).__name__,
+            "verified_before_publish": True,
+            "platforms": [],
+            "note": "Publishing status could not be resolved.",
+        }

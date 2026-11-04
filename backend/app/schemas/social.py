@@ -40,11 +40,72 @@ class SocialAccountCreate(BaseModel):
 
 
 class PlatformStatusOut(BaseModel):
+    """Honest per-platform readiness.
+
+    ``credentials_configured`` — the platform's own app id/secret are present.
+    ``vault_available``       — a token vault is configured, so a credential has
+                                somewhere encrypted to live.
+    ``publish_enabled``       — both of the above. Only then does a live transport
+                                exist.
+    ``capabilities``          — per-operation documented support, whether this
+                                build implements it, and whether it has ever been
+                                verified against a real account.
+    """
+
     platform: str
     credentials_configured: bool
+    vault_available: bool = False
     transport_available: bool
     publish_enabled: bool
+    capabilities: dict[str, Any] = Field(default_factory=dict)
     reason: str
+
+
+class OAuthStartOut(BaseModel):
+    platform: str
+    authorize_url: str
+    state: str
+    redirect_uri: str
+    scopes: list[str]
+    pkce: bool
+    expires_in: int
+
+
+class OAuthCallbackIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: str = Field(min_length=8, max_length=4096)
+    code: str = Field(min_length=1, max_length=4096)
+    brand_profile_id: uuid.UUID
+
+
+class OAuthConnectionOut(BaseModel):
+    platform: str
+    status: str
+    handle: str
+    external_account_id: str | None
+    scopes: list[str]
+    expires_at: datetime | None
+    refreshed: bool
+    #: True only when the provider's credential was exercised with a real read.
+    verified: bool
+    detail: str
+
+
+class AnalyticsIngestRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    brand_profile_id: uuid.UUID
+    platforms: list[str] = Field(default_factory=list)
+    days: int = Field(default=30, ge=1, le=365)
+
+
+class AnalyticsIngestOut(BaseModel):
+    requested: int
+    ingested: int
+    skipped: int
+    unavailable: list[dict[str, str]] = Field(default_factory=list)
+    detail: str
 
 
 class ScheduledPostOut(BaseModel):

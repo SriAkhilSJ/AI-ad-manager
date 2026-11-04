@@ -4,6 +4,15 @@ Importing this package registers every table on ``Base.metadata``, which is what
 Alembic and ``create_all`` rely on.
 """
 
+from app.models.ads import (
+    AdAuthorizationStatus,
+    AdBudgetAuthorization,
+    AdCampaign,
+    AdCampaignStatus,
+    AdOperation,
+    AdOperationKind,
+    AdPlatform,
+)
 from app.models.agent import AgentRun, AgentRunStatus, ModelUsage
 from app.models.analytics import AnalyticsSnapshot
 from app.models.approval import ApprovalAction, ApprovalRecord
@@ -29,6 +38,7 @@ from app.models.creative import (
 from app.models.creative_brief import CreativeBrief
 from app.models.creative_job import CreativeGenerationJob
 from app.models.flow import FlowAssetExport, FlowCompanionSession
+from app.models.integration import OAuthFlow, OAuthToken
 from app.models.idempotency import IdempotencyKey
 from app.models.memory import MarketingMemory, MemoryKind
 from app.models.research import (

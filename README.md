@@ -1,17 +1,47 @@
-# AI-ad-manager
+# Crusor AI Marketing Director
 
-An autonomous **AI Marketing Director** for Crusor AI — not a caption generator.
+An autonomous **AI marketing director**: research → strategy → campaign planning →
+platform-specific content → creative assets → brand validation → founder approval
+→ publishing → analytics → optimisation, on one durable LangGraph runtime with a
+founder-only approval gate that has no bypass.
 
-Phase 1 (Foundation & Architecture) is implemented: a stateful LangGraph director
-delegates to six specialist agents, persists content as immutable versions, and
-routes every publishable asset through a founder-only approval gate that has no
-bypass. **Nothing is published to a social network in Phase 1**, by design.
+The system is built to be *honest about what it cannot do*. Every integration
+reports `unavailable` with a specific reason when its prerequisites are missing,
+and nothing is ever simulated into a success: a post is only marked published
+after the platform is read back, a metric is only stored if the platform returned
+it, and an ad campaign cannot be launched without a founder authorisation bound to
+its exact proposal hash.
 
-```
-Research → Strategy → Campaign Planning → Content → Creative → QA
-        → Human Approval → (Scheduling) → Publishing* → Analytics* → Optimization*
+---
 
-* Phase 2 — the interfaces exist, the transports do not.
+## Status
+
+| Layer | State |
+| --- | --- |
+| Research, strategy, content, creative, brand, growth agents | implemented, mock-tested |
+| Content intelligence (weekly plans, validation) | implemented, mock-tested |
+| Creative Studio (briefs, assets, immutable versions, QA) | implemented, mock-tested |
+| LLM routing, per-provider keys, budgets, pricing verification | implemented, mock-tested |
+| Approval gate (exact version, founder-only, append-only ledger) | implemented and exercised end-to-end |
+| **OAuth connections + token vault (6 platforms)** | implemented, mock-tested, **never live-verified** |
+| **Platform transports (publish + verify + metrics)** | implemented, mock-tested, **never live-verified** |
+| **Analytics ingestion from platform APIs** | implemented, mock-tested, **never live-verified** |
+| **Paid-media governance (proposal → authorisation → ledger)** | implemented, mock-tested |
+| **Paid-media transports (Meta/Google/LinkedIn Ads)** | **not implemented** — refused and recorded |
+| Google Flow / DeepX bridge | implemented behind provenance gates; **blocked** (source, release and installed artifact unverifiable) |
+| Docker, compose, CI | written; not executed in the authoring environment |
+
+The full five-column matrix — implemented / mock-tested / sandbox-verified /
+production-verified / blocked — is in
+[`docs/22-PHASE4-PRODUCTION-INTEGRATIONS.md`](docs/22-PHASE4-PRODUCTION-INTEGRATIONS.md).
+
+```text
+RELEASE ANCHOR:          MISSING
+INSTALLED EXTENSION:     NOT FOUND
+OVERALL PROVENANCE:      UNVERIFIED
+LIVE FLOW GENERATION:    DISABLED
+U1–U7:                   UNRESOLVED
+PHASE 3C.3:              NO-GO — NOT STARTED
 ```
 
 ---
@@ -20,67 +50,98 @@ Research → Strategy → Campaign Planning → Content → Creative → QA
 
 | Layer | Choice |
 | --- | --- |
-| Frontend | React 18 + TypeScript + Tailwind + Vite (`frontend/`) |
-| Backend | Python 3.11 + FastAPI + Pydantic v2 (`backend/`) |
+| Frontend | React 18 + TypeScript + Tailwind + Vite |
+| Backend | Python 3.11 + FastAPI + Pydantic v2 |
 | Orchestration | LangGraph 0.2 with a database-backed checkpointer |
-| Database | PostgreSQL 15 + pgvector (Supabase-compatible); SQLite for dev/test |
-| Async tasks | Celery + Redis, with an `inline` dispatcher fallback |
-| Storage | Any S3-compatible bucket; filesystem backend for dev |
-| LLM | Provider-independent gateway (OpenAI / Anthropic / OpenRouter) with routing and cost tracking |
+| Database | PostgreSQL 15/16 + pgvector (SQLite for dev/test) |
+| Async tasks | Celery + Redis, with an inline dispatcher fallback |
+| Storage | any S3-compatible bucket, or the filesystem |
+| LLM | provider-independent gateway (OpenAI / Anthropic / OpenRouter / verified OpenAI-compatible), task routing, per-call cost tracking |
+| Credentials | AES-256-GCM token vault (`TOKEN_VAULT_KEY`), key never in the database |
 
 ---
 
-## Quick start (development, SQLite, no external services)
+## Quick start
 
 ```bash
-# ---------- backend ----------
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 
 export DATABASE_URL="sqlite+aiosqlite:///./.data/crusor.db"
-export JWT_SECRET="dev-only-jwt-secret-please-rotate-32chars"
+export SECRET_KEY="dev-only-secret-key-at-least-32-characters"
 export BOOTSTRAP_FOUNDER_EMAIL="founder@crusor.ai"
 export BOOTSTRAP_FOUNDER_PASSWORD="crusor-dev-password-1"
 
 cd backend
-../.venv/bin/alembic upgrade head          # create the schema
-../.venv/bin/python -m app.seed.brand_crusor   # load the Crusor brand knowledge base
+../.venv/bin/alembic upgrade head
+../.venv/bin/python -m app.seed.brand_crusor
 ../.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# ---------- frontend (second terminal) ----------
-cd frontend
-npm install
-npm run dev            # http://localhost:5173, proxies /api → :8000
 ```
 
-Open <http://localhost:5173>, sign in with the founder credentials above.
-API docs are at <http://localhost:8000/docs>.
+```bash
+cd frontend && npm install && npm run dev    # http://localhost:5173
+```
 
-The first boot against an empty `users` table creates the founder account from
-`BOOTSTRAP_FOUNDER_*`. Change those values anywhere real.
+API docs: <http://localhost:8000/docs>. Sign in with the bootstrap founder.
+
+To enable publishing you additionally need a vault key and that platform's own app
+credentials — see [`docs/24-ENVIRONMENT-CHECKLIST.md`](docs/24-ENVIRONMENT-CHECKLIST.md).
 
 ---
 
-## The approval guarantee
+## The guarantees, and how they are enforced
 
-The requirement was blunt: *the AI must never publish without explicit founder
-approval, ever, no bypass.* Four independent mechanisms enforce it:
+### 1. Nothing publishes without a founder approval of that exact version
 
-1. **One writer.** `PublishService.publish()` is the only code path that can
-   create a `published_posts` row, and it validates approval inside the same
-   transaction.
-2. **Approval is version-bound.** An approval references an exact
-   `content_version_id` and its content hash. Editing the copy creates version
-   N+1 and invalidates the approval; replacing a creative asset does the same.
-3. **Role-bound.** Only the `founder` role may approve or publish. Marketers
-   write, viewers read.
-4. **Honest failure.** With no platform transport configured, even a fully
-   approved item is refused with `409 publishing_disabled` /
-   `503 integration_unavailable` and stays `APPROVED`. Nothing is simulated.
+* `PublishingService.publish()` is the only writer of `PUBLISHED`, and it checks
+  the approval inside the same transaction as the state change.
+* An approval names the exact `content_version_id` **and** its content hash.
+  Editing the copy creates version N+1 and invalidates the approval; swapping a
+  creative asset does the same.
+* Only the `founder` role may approve or publish.
+* With no transport configured the request is refused (`publishing_disabled` /
+  `integration_unavailable`) and the item keeps its state.
 
-`tests/test_publish_blocked.py` attempts six distinct bypasses, including a
-stale approval hash, a draft with a hand-crafted approval, and an item-scoped
-asset swap. The audit trail (`approval_records`) is append-only.
+### 2. A publish is verified, not assumed
+
+Every transport performs the create call, then reads the created object back. A
+response that creates nothing, or a read-back that returns a different object,
+raises — `PublishedPost` is never written. A final check rejects any adapter result
+without an external id.
+
+### 3. Credentials cannot leak through the API
+
+* `social_accounts` has **no token column**; it stores `token_ref = "vault:<uuid>"`.
+* Tokens live only as AES-256-GCM ciphertext in `oauth_tokens`, with associated
+  data binding each record to its brand, platform and account — a copied
+  ciphertext fails to decrypt in another row.
+* No response schema maps to that table. A database dump alone yields nothing
+  usable without `TOKEN_VAULT_KEY`.
+
+### 4. Analytics are measured or absent
+
+`analytics_snapshots` rows are written only when a platform actually returned a
+value. Each row records `measured`, `unavailable` and `derived` sets, so a missing
+metric is shown as "not reported" rather than drawn as zero.
+
+### 5. Spending requires a founder decision about that exact proposal
+
+* An agent may draft a paid campaign. Drafting cannot spend.
+* A founder authorisation names the proposal hash, a spend ceiling, an operation
+  allow-list and an expiry.
+* Any edit after approval changes the hash and invalidates the authorisation.
+* Consumption is a single atomic `UPDATE … WHERE status='active'`, so one approval
+  funds exactly one launch; the transport is checked *before* consumption so a
+  blocked launch does not burn it.
+* `ad_operations` records every attempt, including refusals.
+
+### 6. Capabilities are never overstated
+
+`GET /api/v1/social/platforms` reports, per platform, whether credentials exist,
+whether a vault exists, whether publishing is therefore enabled, and — per
+operation — `documented` support, `implemented` in this build, and `verification`
+(`unverified` / `sandbox` / `production`). On a fresh checkout every operation is
+`unverified`, because it is.
 
 ---
 
@@ -89,125 +150,113 @@ asset swap. The audit trail (`approval_records`) is append-only.
 ```
 backend/
   app/
-    core/        config, structured logging with secret redaction, error envelope,
-                 security, rate limiting, idempotency, audit
-    db/          engine/session, cross-dialect column types (GUID, JSONB, Vector)
-    models/      21 tables — the 16 required plus users, audit, idempotency,
-                 api keys, workflow checkpoints
-    services/    brand, campaign, content, approval, publishing, creative,
-                 social, analytics, usage, audit
-    agents/      research, strategy, content, creative, brand_guardian,
-                 growth_analyst + registry and a shared base contract
-    director/    LangGraph state, checkpointer, nodes, graph, runtime
-    llm/         provider-independent gateway with routing, budgets, cost
-    publishing/  platform adapters (Phase 1: transport unavailable)
-    api/v1/      auth, brand, campaigns, content, creative, social, analytics,
-                 director, agents, system
-    tasks/       Celery app + swappable dispatcher
-    seed/        Crusor brand knowledge base
-  alembic/       migrations
-  tests/         160 tests
+    core/          config, structured logging with redaction, error envelope,
+                   security, rate limiting, idempotency, audit
+    db/            engine/session, cross-dialect types (GUID, JSONB, Vector)
+    models/        22 tables incl. oauth_tokens, oauth_flows, ad_campaigns,
+                   ad_budget_authorizations, ad_operations
+    services/      brand, campaign, content, approval, publishing, creative,
+                   analytics, analytics_ingest, oauth, ads, research, strategy,
+                   social, usage
+    agents/        research, strategy, content, creative, brand_guardian,
+                   growth_analyst + registry and a shared base contract
+    director/      LangGraph state, checkpointer, nodes, graphs, runtimes
+    llm/           provider-independent gateway, routing, budgets, cost
+    integrations/  token vault (AES-GCM), OAuth, HTTP policy, platform
+                   transports, ads transports, capability matrix
+    publishing/    adapter registry: unavailable vs live, per-account resolution
+    flow/          DeepX/Flow bridge with provenance gates
+    api/v1/        auth, brand, campaigns, content, content_studio, creative,
+                   creative_studio, flow, director, agents, social, analytics,
+                   research, strategy, ads, system
+    tasks/         Celery app + swappable dispatcher
+  alembic/         migrations (head: e6f7a8b9c0d1)
+  tests/           1197 tests
 frontend/
-  src/
-    lib/         typed API client, types mirroring the backend schemas, formatters
-    hooks/       useApi/useMutation, auth context, toasts
-    components/  UI kit, layout shell, shared domain widgets
-    pages/       Overview, Director, Campaigns, Calendar, Creative Studio,
-                 Approval Centre, Social Accounts, Analytics, Brand Knowledge,
-                 Settings
+  src/pages/       Overview, Director, Research, Strategy, Campaigns, Calendar,
+                   Content Studio, Creative Studio, Approvals, Social Accounts,
+                   Advertising, Analytics, Brand, Settings
 scripts/
-  acceptance.py  proves all 13 acceptance criteria against a live server
-docs/
-  00-ARCHITECTURE-AUDIT.md      A. what existed, constraints found
-  01-IMPLEMENTATION-PLAN.md     B. milestones, non-goals
-  02-FILE-PLAN.md               C. file-level plan
-  03-RISKS-AND-DEPENDENCIES.md  D. risk register, external dependencies
-  04-ACCEPTANCE-EVIDENCE.md     evidence per criterion
+  acceptance.py        end-to-end proof of the acceptance criteria
+  flow_source_audit.py provenance audit (expected: SOURCE_ABSENT, exit 3)
+docker-compose.yml    PG16 + Redis + backend + worker + frontend
+.github/workflows/    CI: tests, migrations, audit gate, typecheck, secret scan
 ```
-
----
-
-## The dashboard — "CRUSOR MARKETING HQ"
-
-Dark, premium, desktop-first: black and charcoal, subtle violet, metallic silver,
-tight uppercase tracking. Ten routes, all wired to the real API:
-
-| Route | Purpose |
-| --- | --- |
-| `/` Overview | System truth, campaign and content counters, next actions |
-| `/director` | Start a workflow, watch the task DAG, decide at the interrupt |
-| `/campaigns` | Campaign list and detail with plan and pillars |
-| `/calendar` | Content grouped by day, filterable by status and platform |
-| `/creative` | Upload assets, replace them, see the art-direction brief |
-| `/approvals` | Founder review queue with version hash and approval ledger |
-| `/social` | Platform readiness and account metadata (no tokens) |
-| `/analytics` | Performance (needs connectors) and measured model spend |
-| `/brand` | The brand knowledge base — editable without a deploy |
-| `/settings` | Integration status, agent contracts, security posture |
-
-There are no fake numbers anywhere. A panel with no data shows an empty state
-that explains what would produce data; a disabled integration shows
-`unavailable` and the reason.
 
 ---
 
 ## Tests and acceptance
 
 ```bash
-cd backend && pytest -q                  # 160 tests
-cd frontend && npm run typecheck         # tsc --noEmit
-cd frontend && npm run build             # tsc -b && vite build
+cd backend
+../.venv/bin/python -m pytest tests          # 1197 tests
+npx tsc --noEmit --project ../frontend       # or: cd ../frontend && npx tsc --noEmit
+cd ../frontend && npm run build
 
-# end-to-end proof of the 13 acceptance criteria against a running server
-.venv/bin/python scripts/acceptance.py --base-url http://127.0.0.1:8000
+# end-to-end against a running server
+cd ../backend && ../.venv/bin/python ../scripts/acceptance.py --base-url http://127.0.0.1:8000
 ```
 
-`scripts/acceptance.py` exits non-zero if any criterion fails and writes
-`docs/acceptance-run.json`. See `docs/04-ACCEPTANCE-EVIDENCE.md` for the observed
-output of the last full run (13/13 criteria).
+The acceptance script exits non-zero if any criterion fails and writes
+`docs/acceptance-run.json`.
+
+`scripts/flow_source_audit.py` is expected to exit **3** with `SOURCE_ABSENT`. That
+is the gate working: the DeepX source is not in this repository and must never be
+vendored.
+
+CI (`.github/workflows/ci.yml`) runs the suite with **no credentials at all**,
+asserts the audit still exits 3, typechecks and builds the frontend, and fails if a
+`.env` file or an API-key-shaped string is committed.
 
 ---
 
 ## Configuration
 
-All configuration is environment-based; secrets are never exposed by the API or
-written to logs (a structlog processor redacts secret-bearing keys and bearer
-tokens before emission). See `.env.example` for the full list.
+All configuration is environment-based; secrets are never returned by the API or
+written to logs (structlog redacts secret-bearing keys and bearer tokens).
 
-**Required in production**
+**Required in production:** `DATABASE_URL` (PostgreSQL), `SECRET_KEY`,
+`BOOTSTRAP_FOUNDER_*` on first boot.
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | `postgresql+asyncpg://…` |
-| `JWT_SECRET` | Token signing key (32+ bytes) |
-| `BOOTSTRAP_FOUNDER_EMAIL` / `BOOTSTRAP_FOUNDER_PASSWORD` | First-run founder account |
+**Required to publish anything:** `TOKEN_VAULT_BACKEND=db`, `TOKEN_VAULT_KEY`,
+`OAUTH_REDIRECT_BASE_URL`, plus each platform's own `*_CLIENT_*` pair.
 
-**Optional — each reports `unavailable` with a reason until configured**
+**Optional, each reporting `unavailable` with a reason until configured:**
+LLM provider keys, Redis/Celery, S3 storage, ads transport credentials (none exist
+yet), Flow provenance material.
 
-| Variable | Enables |
-| --- | --- |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` | Real LLM generation instead of deterministic agents |
-| `LLM_DEFAULT_PROVIDER` / `LLM_DEFAULT_MODEL` / `LLM_ROUTING_JSON` | Per-agent model routing |
-| `LLM_MONTHLY_BUDGET_USD` | Hard spend ceiling |
-| `REDIS_URL` / `CELERY_BROKER_URL` | Celery workers and distributed rate limiting |
-| `S3_BUCKET` + credentials | Durable creative asset storage |
-| `APP_ENV=production` | Disables SQLite, requires secrets, enforces CORS allow-list |
+The complete table, including what each missing value disables and what the founder
+must provision, is in
+[`docs/24-ENVIRONMENT-CHECKLIST.md`](docs/24-ENVIRONMENT-CHECKLIST.md).
 
-`GET /api/v1/system/status` reports the resolved state of every one of these.
+`GET /api/v1/system/status` reports the resolved state of all of it, including
+`publishing.platforms[]` and `ads.transports[]`.
 
 ---
 
-## What Phase 1 does not do
+## Documentation
 
-Deliberate absences, surfaced in the product rather than hidden:
+| Document | Contents |
+| --- | --- |
+| `docs/00`–`04` | Phase 1 architecture audit, plan, file plan, risks, acceptance evidence |
+| `docs/05`–`07` | Phase 2 audit, plan, final report |
+| `docs/08`–`10` | Phase 3 integration readiness, provider routing security, budget safety |
+| `docs/11`–`12` | Phase 3A content intelligence, Phase 3B creative studio |
+| `docs/13`–`21` | Phase 3C Flow security, DeepX remediation, trust pipeline, hardening, retry/delivery, cancellation semantics, correlation |
+| **`docs/22`** | **Phase 4: integrations, transports, ads governance, completion matrix, security audit** |
+| **`docs/23`** | **Deployment guide (dev, compose, migrations, rollback, health, backups)** |
+| **`docs/24`** | **Environment and credential checklist** |
 
-* **No publishing.** No transport ships. Approval and scheduling are complete.
-* **No LLM keys, no generation.** Agents run deterministic implementations and
-  report `generation_mode: "deterministic"` with `requires_human_review: true`.
-* **No image/video generation.** The Creative Agent produces a brief; a human
-  uploads the bytes.
-* **No analytics collection.** Needs connectors and published posts. The API
-  returns `has_data: false`, `data_source: "none"`, and never estimates.
-* **No OAuth token storage.** `social_accounts` keeps a vault reference only.
+---
 
-Phase 2 adds transports, connectors, real generation and the optimization loop.
+## What this system does not do
+
+* It does not publish to a social network until a platform's app credentials, a
+  vault key and a connected account all exist. Without them it refuses, visibly.
+* It does not launch or modify a paid campaign at all: the governance is complete,
+  the transports are not.
+* It does not generate live Google Flow media. The bridge is implemented and gated
+  on a source licence, a signed release and an installed artifact, none of which
+  can be verified here.
+* It does not claim a verification it has not performed. Where the code is
+  mock-tested only, the matrix says so.

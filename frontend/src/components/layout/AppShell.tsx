@@ -16,6 +16,7 @@ import {
   IconOverview,
   IconSettings,
   IconSocial,
+  IconChart,
   IconStudio,
 } from './icons'
 
@@ -38,6 +39,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/creative', label: 'Creative Studio', icon: IconStudio },
   { to: '/approvals', label: 'Approval Centre', icon: IconApproval },
   { to: '/social', label: 'Social Accounts', icon: IconSocial },
+  { to: '/ads', label: 'Advertising', icon: IconChart },
   { to: '/analytics', label: 'Analytics', icon: IconAnalytics },
   { to: '/brand', label: 'Brand Knowledge', icon: IconBrand },
   { to: '/settings', label: 'Settings', icon: IconSettings },

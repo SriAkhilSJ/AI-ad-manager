@@ -305,7 +305,26 @@ class Settings(BaseSettings):
     x_client_secret: str | None = None
     reddit_client_id: str | None = None
     reddit_client_secret: str | None = None
-    token_vault_backend: Literal["none", "s3", "external"] = "none"
+    # Token vault (OAuth credentials at rest). ``none`` disables OAuth entirely;
+    # ``db`` stores AES-256-GCM ciphertext in ``oauth_tokens``; ``s3``/``external``
+    # are declared but not implemented and therefore refuse rather than downgrade.
+    token_vault_backend: Literal["none", "db", "s3", "external"] = "none"
+    # 32-byte key material (hex, base64 or a >=32 character passphrase).
+    token_vault_key: str | None = None
+
+    # ---- social publishing (Phase 4) -----------------------------------
+    # Public base URL used to build OAuth redirect URIs.
+    oauth_redirect_base_url: str = "http://localhost:8000"
+    # How long an authorisation attempt stays valid.
+    oauth_state_ttl_seconds: int = 600
+    # Per-platform HTTP timeout/retry policy for publish + analytics calls.
+    integration_timeout_seconds: float = 30.0
+    integration_max_retries: int = 3
+    # Refresh a token this many seconds before it expires.
+    token_refresh_skew_seconds: int = 120
+    # Paid ads are gated on a founder authorisation; this is the maximum a single
+    # authorisation may cover, as a second line of defence against a typo.
+    ads_max_authorized_spend_cents: int = 5_000_00
 
     # ------------------------------------------------------------------ #
     @field_validator(

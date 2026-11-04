@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import rate_limit
 from app.api.v1 import (
+    ads,
     agents,
     analytics,
     auth,
@@ -25,6 +26,7 @@ from app.api.v1 import (
 api_router = APIRouter(dependencies=[Depends(rate_limit)])
 
 api_router.include_router(auth.router)
+api_router.include_router(ads.router)
 api_router.include_router(brand.router)
 api_router.include_router(campaigns.router)
 api_router.include_router(content.router)

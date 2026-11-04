@@ -2,21 +2,29 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
+from fastapi.responses import JSONResponse
 
-from app.api.deps import DB, CurrentUser, EditorUser
-from app.models.social import SocialAccountStatus
+from app.api.deps import DB, CurrentUser, EditorUser, FounderUser, SettingsDep
+from app.integrations.platforms import CAPABILITIES, capabilities_for
+from app.models.social import PublishedPost, ScheduledPost, SocialAccountStatus
 from app.publishing.adapters import get_adapter_registry
 from app.schemas.social import (
+    AnalyticsIngestOut,
+    AnalyticsIngestRequest,
+    OAuthCallbackIn,
+    OAuthConnectionOut,
+    OAuthStartOut,
     PlatformStatusOut,
     PublishedPostOut,
     ScheduledPostOut,
     SocialAccountCreate,
     SocialAccountOut,
 )
+from app.services.analytics_ingest import AnalyticsIngestService
+from app.services.oauth import OAuthService
 from app.services.social import SocialAccountService
 from sqlalchemy import select
-from app.models.social import PublishedPost, ScheduledPost
 
 router = APIRouter(prefix="/social", tags=["social"])
 
@@ -95,3 +103,103 @@ async def list_published(session: DB, user: CurrentUser) -> list[PublishedPostOu
         )
     ).scalars().all()
     return [PublishedPostOut.model_validate(r) for r in rows]
+
+
+# --------------------------------------------------------------------- OAuth
+@router.get(
+    "/capabilities",
+    summary="Documented support, implementation state and verification state per platform",
+)
+async def capability_matrix(user: CurrentUser) -> dict[str, object]:
+    """Three separate questions per capability.
+
+    ``documented`` — what the platform's API reference says it can do.
+    ``implemented`` — whether this build implements it.
+    ``verification`` — whether it has ever been exercised against a real account.
+    On a fresh installation every entry is ``unverified``, because it has not.
+    """
+    return {
+        "platforms": CAPABILITIES,
+        "note": (
+            "Documented support comes from each provider's public API reference. "
+            "Verification is only set to 'sandbox' or 'production' after a real call."
+        ),
+    }
+
+
+@router.post(
+    "/oauth/{platform}/start",
+    response_model=OAuthStartOut,
+    summary="Begin an OAuth connection (founder only)",
+)
+async def oauth_start(
+    platform: str,
+    brand_profile_id: uuid.UUID,
+    session: DB,
+    settings: SettingsDep,
+    user: FounderUser,
+) -> OAuthStartOut:
+    result = await OAuthService(session, settings).start(
+        platform=platform, brand_profile_id=brand_profile_id, actor_id=user.id
+    )
+    await session.commit()
+    return OAuthStartOut(**result)
+
+
+@router.get(
+    "/oauth/callback",
+    response_model=OAuthConnectionOut,
+    summary="OAuth redirect target (authenticated by signed, single-use state)",
+)
+async def oauth_callback(
+    session: DB,
+    settings: SettingsDep,
+    state: str = Query(min_length=8),
+    code: str = Query(min_length=1),
+    brand_profile_id: uuid.UUID = Query(...),
+) -> OAuthConnectionOut:
+    """The provider redirects here, so there is no bearer token in the request.
+
+    Authorisation comes from the signed state instead: HMAC over a payload that
+    names the brand and platform, an expiry, and a single-use row. A replayed or
+    forged callback is rejected before any code is exchanged.
+    """
+    result = await OAuthService(session, settings).callback(
+        state=state, code=code, brand_profile_id=brand_profile_id
+    )
+    await session.commit()
+    return OAuthConnectionOut(**result)
+
+
+@router.post(
+    "/accounts/{account_id}/refresh",
+    response_model=OAuthConnectionOut,
+    summary="Renew an account credential (founder only)",
+)
+async def refresh_account(
+    account_id: uuid.UUID, session: DB, settings: SettingsDep, user: FounderUser
+) -> OAuthConnectionOut:
+    result = await OAuthService(session, settings).refresh(account_id)
+    await session.commit()
+    return OAuthConnectionOut(**result)
+
+
+# ------------------------------------------------------------------ analytics
+@router.post(
+    "/analytics/ingest",
+    response_model=AnalyticsIngestOut,
+    summary="Pull measured post metrics from platform APIs",
+)
+async def ingest_analytics(
+    payload: AnalyticsIngestRequest,
+    session: DB,
+    settings: SettingsDep,
+    user: EditorUser,
+) -> AnalyticsIngestOut:
+    result = await AnalyticsIngestService(session, settings).ingest(
+        brand_profile_id=payload.brand_profile_id,
+        platforms=payload.platforms or None,
+        days=payload.days,
+    )
+    await session.commit()
+    return AnalyticsIngestOut(**result)

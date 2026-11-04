@@ -119,11 +119,14 @@ class PublishingService:
         if existing is not None:
             return item, existing
 
-        # 2/3. transport gate
+        # 2/3. transport gate — credentials, a usable token vault and a stored
+        # credential for this account must all exist. Otherwise this refuses
+        # before any network call and the item keeps its state.
         registry = get_adapter_registry()
-        adapter = registry.get(item.platform)
-        if not (adapter.credentials_configured and adapter.transport_available):
-            raise _publishing_disabled(adapter)
+        advertised = registry.get(item.platform)
+        if not (advertised.credentials_configured and registry.vault_available):
+            raise _publishing_disabled(advertised)
+        adapter = await registry.resolve(item.platform, session=self.session, account=account)
 
         # 4. concurrency guard + state transition
         await self._transition_to_publishing(item, approval)
@@ -158,6 +161,23 @@ class PublishingService:
                 reason=f"adapter_error: {type(exc).__name__}",
             )
             raise
+
+        # A result without a remote id is not a publication. The transport is
+        # required to verify the object before returning, and this is the last
+        # line of defence against a fabricated success.
+        if not result.external_post_id:
+            await self.approvals.apply(
+                item.id,
+                "fail",
+                actor_id=actor_id,
+                actor_role=actor_role,
+                reason="adapter_returned_no_external_id",
+            )
+            raise IntegrationUnavailableError(
+                "The platform adapter returned no external post id, so the post is not "
+                "considered published.",
+                details={"platform": item.platform},
+            )
 
         published = PublishedPost(
             content_item_id=item.id,
@@ -245,13 +265,17 @@ class PublishingService:
 
 
 def _publishing_disabled(adapter) -> IntegrationUnavailableError:  # type: ignore[no-untyped-def]
+    """Refusal raised when no live transport exists for this platform.
+
+    The message names the missing input rather than pretending the feature is
+    unimplemented: credentials, a token vault and a connected account are three
+    distinct prerequisites.
+    """
     from app.core.errors import PublishingDisabledError
 
     return PublishingDisabledError(
-        adapter.reason
-        + " Phase 1 runs in human-approval-only mode: content can be approved and "
-        "scheduled, but no network publish is performed.",
-        details={"platform": adapter.platform.value},
+        adapter.reason,
+        details={"platform": adapter.platform.value, "stage": "preflight"},
     )
 
 

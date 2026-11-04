@@ -19,6 +19,7 @@ import { CreativeStudioPage } from './pages/CreativeStudio'
 import { CreativeAssetDetailPage } from './pages/creative/CreativeAssetDetail'
 import { ApprovalCentrePage } from './pages/ApprovalCentre'
 import { SocialAccountsPage } from './pages/SocialAccounts'
+import { AdsStudioPage } from './pages/AdsStudio'
 import { AnalyticsPage } from './pages/Analytics'
 import { BrandKnowledgePage } from './pages/BrandKnowledge'
 import { SettingsPage } from './pages/Settings'
@@ -86,6 +87,7 @@ export default function App() {
         <Route path="creative/assets/:assetId" element={<CreativeAssetDetailPage />} />
         <Route path="approvals" element={<ApprovalCentrePage />} />
         <Route path="social" element={<SocialAccountsPage />} />
+        <Route path="ads" element={<AdsStudioPage />} />
         <Route path="analytics" element={<AnalyticsPage />} />
         <Route path="brand" element={<BrandKnowledgePage />} />
         <Route path="settings" element={<SettingsPage />} />

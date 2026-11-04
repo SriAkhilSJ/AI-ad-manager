@@ -183,3 +183,10 @@ export const IconPlug = (p: IconProps) => (
     <path d="M12 16.5V21" />
   </Svg>
 )
+
+export const IconChart = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 3v18h18" />
+    <path d="M7 15l3-4 3 3 4-6" />
+  </Svg>
+)

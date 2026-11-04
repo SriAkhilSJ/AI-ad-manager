@@ -1,0 +1,95 @@
+# Crusor AI Marketing Director — local production-shaped stack.
+#
+#   cp .env.example .env      # fill in the values you have; empty ones stay disabled
+#   docker compose up --build
+#
+# Nothing here is a credential. Every secret is read from .env, which is ignored
+# by Git. The backend refuses to start in APP_ENV=production with a placeholder
+# SECRET_KEY, so an accidental "production" run fails loudly instead of silently
+# using a development key.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crusor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crusor-local-only}
+      POSTGRES_DB: ${POSTGRES_DB:-crusor}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crusor} -d ${POSTGRES_DB:-crusor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-crusor}:${POSTGRES_PASSWORD:-crusor-local-only}@db:5432/${POSTGRES_DB:-crusor}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      TASK_DISPATCHER: celery
+      ENVIRONMENT: ${ENVIRONMENT:-staging}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      FLOW_LIVE_GENERATION_ENABLED: "false"
+      CREATIVE_ALLOW_PAID_GENERATION: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    # Apply migrations before serving, exactly once, from this container.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers"
+
+  worker:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-crusor}:${POSTGRES_PASSWORD:-crusor-local-only}@db:5432/${POSTGRES_DB:-crusor}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      TASK_DISPATCHER: celery
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=INFO"]
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:
+  redisdata:

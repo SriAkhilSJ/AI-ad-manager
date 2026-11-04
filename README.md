@@ -26,6 +26,7 @@ its exact proposal hash.
 | **OAuth connections + token vault (6 platforms)** | implemented, mock-tested, **never live-verified** |
 | **Platform transports (publish + verify + metrics)** | implemented, mock-tested, **never live-verified** |
 | **Analytics ingestion from platform APIs** | implemented, mock-tested, **never live-verified** |
+| **Scheduled publishing (due-post runner + Celery job)** | implemented, mock-tested |
 | **Paid-media governance (proposal → authorisation → ledger)** | implemented, mock-tested |
 | **Paid-media transports (Meta/Google/LinkedIn Ads)** | **not implemented** — refused and recorded |
 | Google Flow / DeepX bridge | implemented behind provenance gates; **blocked** (source, release and installed artifact unverifiable) |
@@ -171,7 +172,7 @@ backend/
                    research, strategy, ads, system
     tasks/         Celery app + swappable dispatcher
   alembic/         migrations (head: e6f7a8b9c0d1)
-  tests/           1197 tests
+  tests/           1204 tests
 frontend/
   src/pages/       Overview, Director, Research, Strategy, Campaigns, Calendar,
                    Content Studio, Creative Studio, Approvals, Social Accounts,
@@ -189,7 +190,7 @@ docker-compose.yml    PG16 + Redis + backend + worker + frontend
 
 ```bash
 cd backend
-../.venv/bin/python -m pytest tests          # 1197 tests
+../.venv/bin/python -m pytest tests          # 1204 tests
 npx tsc --noEmit --project ../frontend       # or: cd ../frontend && npx tsc --noEmit
 cd ../frontend && npm run build
 

@@ -181,7 +181,34 @@ declared with their documented endpoints and an explicit reason they cannot run
 here (unapproved app / no developer token / access form not granted). `GET
 /api/v1/ads/transports` and `GET /api/v1/system/status` both report this.
 
-### 2.7 Production engineering
+### 2.7 Scheduled publishing and analytics refresh (`services/scheduler.py`)
+
+Before this, a scheduled post was a row nothing acted on, and `refresh_analytics`
+was a placeholder that always returned `skipped`. Both now run:
+
+* `SchedulerService.run_due()` claims due rows with
+  `UPDATE … WHERE status='pending'` (rowcount-checked, so two workers cannot
+  publish one post), then calls the **same** `PublishingService.publish()` a
+  manual publish uses. A schedule whose approval was invalidated by an edit
+  therefore fails instead of shipping a stale version.
+* Failures increment `attempts`, store the reason in `last_error`, and park the
+  row as `failed` after three attempts rather than looping forever on a refusal
+  that can never succeed.
+* `refresh_analytics` walks the brands and delegates to the ingestion service;
+  without a vault it reports `unavailable` per brand and writes nothing.
+* Both are registered as Celery jobs (`publish_due`, `refresh_analytics`) and
+  exposed as `POST /api/v1/social/scheduled/run` (founder-only).
+
+Writing the tests found a **latent defect in the publish path** that had never
+been reachable: `publish()` performed its optimistic `→ PUBLISHING` claim and then
+called `approvals.apply(..., "publish")`, whose legality check evaluates the
+*current* status — already `PUBLISHING` — so every publish died with
+`Action 'publish' is not allowed from status 'PUBLISHING'`. It was invisible while
+no transport existed, because the request was refused earlier. The claim now
+writes its own audit entry instead, and
+`test_due_post_is_published_through_the_normal_gates` is the regression test.
+
+### 2.8 Production engineering
 
 | Piece | File | State |
 | --- | --- | --- |
@@ -212,6 +239,7 @@ verified that was not actually exercised.**
 | X publishing | yes (text) | yes (280-char refusal, verify) | **no** | **no** | X app with write access |
 | YouTube publishing | yes (video) | no live upload exercised | **no** | **no** | Google OAuth client + quota |
 | Reddit publishing | yes (self post) | yes | **no** | **no** | Reddit app + subreddit permissions |
+| Scheduled publishing (`run_due`) | yes | yes (publishes, refuses edited approval, no double-publish) | n/a | n/a | — |
 | Post verification before PUBLISHED | yes | yes (verify-fails case raises) | no | no | — (logic proven offline) |
 | Token refresh on expiry | yes | yes | **no** | **no** | provider credentials |
 | Analytics ingestion | yes | yes (measured vs unavailable) | **no** | **no** | connected accounts |
@@ -257,8 +285,10 @@ policy, role boundaries.
 
 | Check | Result |
 | --- | --- |
-| Phase 4 module | **44 passed** |
-| Full backend suite | **1197 passed in 550.93s**, 0 failed (09:04:10Z → 09:13:24Z) |
+| Phase 4 integrations module | **44 passed** |
+| Phase 4.1 scheduler module | **7 passed** |
+| Acceptance | **65/65**, `generated_at 2026-11-04T09:24:19Z` (Phase 4 run) |
+| Full backend suite | **1204 passed in 556.02s**, 0 failed (10:24:35Z → 10:33:54Z) |
 | Migration | `d5e6f7a8b9c0 → e6f7a8b9c0d1` up → down → up, head `e6f7a8b9c0d1` |
 | Frontend types | `npx tsc --noEmit` exit 0 |
 | Frontend build | `index-Bqzo970z.js` 411.77 kB (gzip 112.31 kB) |

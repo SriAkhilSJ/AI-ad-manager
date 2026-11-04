@@ -186,6 +186,26 @@ async def refresh_account(
 
 # ------------------------------------------------------------------ analytics
 @router.post(
+    "/scheduled/run",
+    summary="Publish every due scheduled post now (founder only)",
+)
+async def run_due_posts(
+    session: DB, settings: SettingsDep, user: FounderUser, limit: int = Query(default=50, ge=1, le=200)
+) -> dict[str, object]:
+    """Executes the scheduler immediately.
+
+    Each publish goes through the same approval and transport gates as a manual
+    one, so a schedule whose approval was invalidated by an edit fails here rather
+    than shipping an unapproved version.
+    """
+    from app.services.scheduler import SchedulerService
+
+    result = await SchedulerService(session, settings).run_due(limit=limit)
+    await session.commit()
+    return result
+
+
+@router.post(
     "/analytics/ingest",
     response_model=AnalyticsIngestOut,
     summary="Pull measured post metrics from platform APIs",

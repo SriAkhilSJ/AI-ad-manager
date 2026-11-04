@@ -128,15 +128,31 @@ class PublishingService:
             raise _publishing_disabled(advertised)
         adapter = await registry.resolve(item.platform, session=self.session, account=account)
 
-        # 4. concurrency guard + state transition
+        # 4. concurrency guard + state transition.
+        #
+        # ``_transition_to_publishing`` performs the atomic
+        # ``UPDATE … WHERE status IN ('APPROVED','SCHEDULED')`` claim, so exactly
+        # one caller moves the item to PUBLISHING. Calling
+        # ``approvals.apply(..., "publish")`` as well was a bug: that path
+        # validates the transition *from the item's current status*, which by then
+        # is already PUBLISHING, so every publish died with
+        # "Action 'publish' is not allowed from status 'PUBLISHING'". It was never
+        # visible while no transport existed, because the request was refused
+        # before this point. The audit entry is written explicitly instead.
         await self._transition_to_publishing(item, approval)
-        item, _ = await self.approvals.apply(
-            item.id,
-            "publish",
+        await record_audit(
+            self.session,
+            action="content.publish",
+            entity_type="content_item",
+            entity_id=item.id,
             actor_id=actor_id,
-            actor_role=actor_role,
-            reason="Approved content released to platform adapter",
-            idempotency_key=idempotency_key,
+            before={"status": ContentStatus.APPROVED.value},
+            after={
+                "status": item.status,
+                "approval_record_id": str(approval.id),
+                "content_version_id": str(version.id),
+            },
+            metadata={"reason": "Approved content released to platform adapter"},
         )
 
         payload = PublishPayload(

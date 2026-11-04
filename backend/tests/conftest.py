@@ -20,11 +20,68 @@ _TMP = Path(__file__).parent / ".tmp"
 _TMP.mkdir(exist_ok=True)
 DB_FILE = _TMP / f"test-{uuid.uuid4().hex}.db"
 
+#: Set CRUSOR_TEST_DATABASE_URL to run the whole suite against PostgreSQL. CI
+#: does this so the production dialect is exercised, not only SQLite.
+_EXTERNAL_DB = os.environ.get("CRUSOR_TEST_DATABASE_URL", "").strip()
+_WORKER = os.environ.get("PYTEST_XDIST_WORKER", "").strip()
+
+
+def _worker_database(url: str) -> str:
+    """Give every xdist worker its own database.
+
+    Parallel workers share one PostgreSQL server, and each one creates the schema
+    for itself. Without a private database they drop each other's tables mid-test
+    — which shows up as a wall of errors that has nothing to do with the code
+    being tested.
+    """
+    if not _WORKER or not url.startswith("postgres"):
+        return url
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    name = (parts.path.lstrip("/") or "postgres") + f"_{_WORKER}"
+    return urlunsplit((parts.scheme, parts.netloc, "/" + name, parts.query, parts.fragment))
+
+
+def _ensure_worker_database(url: str) -> None:
+    """Create this worker's database if it does not exist yet."""
+    if not _WORKER or not url.startswith("postgres"):
+        return
+    import asyncpg
+    from urllib.parse import urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    current = parts.path.lstrip("/") or "postgres"
+    suffix = f"_{_WORKER}"
+    # ``url`` is already the worker's own database (conftest rewrote it at import),
+    # so strip the suffix to find the database that actually exists to connect to.
+    name = current if current.endswith(suffix) else current + suffix
+    root = current[: -len(suffix)] if current.endswith(suffix) else current
+    base = urlunsplit(
+        (parts.scheme, parts.netloc, "/" + root, parts.query, parts.fragment)
+    ).replace("postgresql+asyncpg://", "postgresql://")
+
+    async def _create() -> None:
+        conn = await asyncpg.connect(base)
+        try:
+            exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", name)
+            if not exists:
+                await conn.execute(f'CREATE DATABASE "{name}"')
+        finally:
+            await conn.close()
+
+    asyncio.run(_create())
+
+
+_TEST_DATABASE_URL = _worker_database(
+    _EXTERNAL_DB or f"sqlite+aiosqlite:///{DB_FILE}"
+)
+
 os.environ.update(
     {
         "ENVIRONMENT": "test",
         "DEBUG": "false",
-        "DATABASE_URL": f"sqlite+aiosqlite:///{DB_FILE}",
+        "DATABASE_URL": _TEST_DATABASE_URL,
         "SECRET_KEY": "test-secret-key-0123456789abcdef0123456789abcdef",
         "BOOTSTRAP_FOUNDER_EMAIL": "founder@example.com",
         "BOOTSTRAP_FOUNDER_PASSWORD": "founder-test-password",
@@ -60,8 +117,21 @@ def event_loop():  # type: ignore[no-untyped-def]
     loop.close()
 
 
+def is_postgres() -> bool:
+    return os.environ["DATABASE_URL"].startswith("postgres")
+
+
 @pytest.fixture(scope="session")
 def engine():  # type: ignore[no-untyped-def]
+    if is_postgres():
+        _ensure_worker_database(os.environ["DATABASE_URL"])
+        # asyncpg binds a connection to the loop that created it, and pytest
+        # runs each test on its own loop. NullPool gives every checkout a fresh
+        # connection on the running loop, which is what makes a session-scoped
+        # engine usable here at all.
+        from sqlalchemy.pool import NullPool
+
+        return create_async_engine(os.environ["DATABASE_URL"], future=True, poolclass=NullPool)
     eng = create_async_engine(os.environ["DATABASE_URL"], future=True)
     _install_sqlite_pragmas(eng)
     return eng
@@ -76,9 +146,20 @@ def session_factory(engine):  # type: ignore[no-untyped-def]
 def _create_schema(engine):  # type: ignore[no-untyped-def]
     async def _create() -> None:
         async with engine.begin() as conn:
+            if is_postgres():
+                # A previous run may have left a schema behind; start from zero so
+                # the DDL exercised is the one the models declare today.
+                await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
 
-    asyncio.get_event_loop().run_until_complete(_create())
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # ``asyncio.run`` (used above to create a worker database) closes its loop
+        # and clears the current one; recreate it rather than assuming it exists.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(_create())
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +171,13 @@ async def _clean_tables(engine):  # type: ignore[no-untyped-def]
     """
     yield
     from sqlalchemy import text
+
+    if is_postgres():
+        autocommit = engine.execution_options(isolation_level="AUTOCOMMIT")
+        names = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+        async with autocommit.connect() as conn:
+            await conn.execute(text(f"TRUNCATE {names} RESTART IDENTITY CASCADE"))
+        return
 
     autocommit = engine.execution_options(isolation_level="AUTOCOMMIT")
     async with autocommit.connect() as conn:

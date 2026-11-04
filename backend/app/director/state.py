@@ -69,6 +69,17 @@ class DirectorState(TypedDict, total=False):
     trace: Annotated[list[dict[str, Any]], _merge_list]
     agent_runs: Annotated[list[str], _merge_list]
 
+    # post-approval lifecycle (schedule → publish → measure → optimise)
+    lifecycle_stage: str  # none|scheduled|published|measured|optimised|handed_off
+    decision_applied: list[dict[str, Any]]
+    schedule_plan: list[dict[str, Any]]
+    scheduled_post_ids: list[str]
+    schedule_blocked: list[dict[str, Any]]
+    publish_results: dict[str, Any] | None
+    analytics: dict[str, Any] | None
+    optimizations: list[dict[str, Any]]
+    optimization_note: str
+
     # outputs
     content_item_ids: list[str]
     created_campaign_id: str | None
@@ -111,6 +122,15 @@ def initial_state(
         errors=[],
         trace=[],
         agent_runs=[],
+        lifecycle_stage="none",
+        decision_applied=[],
+        schedule_plan=[],
+        scheduled_post_ids=[],
+        schedule_blocked=[],
+        publish_results=None,
+        analytics=None,
+        optimizations=[],
+        optimization_note="",
         content_item_ids=[],
         created_campaign_id=None,
         summary="",

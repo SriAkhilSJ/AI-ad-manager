@@ -9,6 +9,7 @@ and write the shared, checkpointed state.
 from __future__ import annotations
 
 import uuid
+from uuid import UUID
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,6 +23,7 @@ from app.llm.gateway import LLMGateway
 from app.models.brand import BrandProfile
 from app.models.content import ContentItem
 from app.services.approval import ApprovalService
+from app.director.lifecycle import LifecycleActions, lifecycle_errors
 from app.services.brand import BrandService
 from app.services.campaign import CampaignService
 from app.services.content import ContentService
@@ -635,18 +637,184 @@ class DirectorNodes:
             "trace": [_trace("approval_requested", items=len(items))],
         }
 
-    # ------------------------------------------------------------- finalize
-    async def finalize(self, state: DirectorState) -> dict[str, Any]:
+    # ------------------------------------------------- post-approval lifecycle
+    async def schedule(self, state: DirectorState) -> dict[str, Any]:
+        """Schedule the approved content, or record exactly why it cannot be."""
+        decision = state.get("approval_decision") or {}
+        actions = LifecycleActions(self.session, actor_id=self._actor(state))
+        result = await actions.schedule(
+            content_item_ids=list(state.get("content_item_ids") or []),
+            horizon_days=int((decision.get("horizon_days") or 7)),
+        )
+        scheduled = result.get("scheduled") or []
+        return {
+            "status": "executing",
+            "phase": "scheduling",
+            "lifecycle_stage": "scheduled" if scheduled else "handed_off",
+            "schedule_plan": scheduled,
+            "scheduled_post_ids": [row["scheduled_post_id"] for row in scheduled],
+            "schedule_blocked": result.get("blocked") or [],
+            "errors": lifecycle_errors("schedule", result),
+            "trace": [
+                _trace(
+                    "content_scheduled",
+                    scheduled=len(scheduled),
+                    blocked=len(result.get("blocked") or []),
+                )
+            ],
+            "summary": result.get("detail", ""),
+        }
+
+    async def publish(self, state: DirectorState) -> dict[str, Any]:
+        """Publish only what the founder asked to publish now; defer the rest."""
+        decision = state.get("approval_decision") or {}
+        actions = LifecycleActions(self.session, actor_id=self._actor(state))
+        result = await actions.publish(
+            scheduled_post_ids=list(state.get("scheduled_post_ids") or []),
+            publish_now=bool(decision.get("publish_now")),
+        )
+        published = result.get("published") or []
+        return {
+            "publish_results": result,
+            "phase": "publishing",
+            "lifecycle_stage": "published" if published else state.get("lifecycle_stage"),
+            "errors": lifecycle_errors("publish", result),
+            "trace": [
+                _trace(
+                    "publish_attempted",
+                    published=len(published),
+                    failed=len(result.get("failed") or []),
+                    deferred=len(result.get("deferred") or []),
+                )
+            ],
+        }
+
+    async def measure(self, state: DirectorState) -> dict[str, Any]:
+        """Ingest measured analytics; record 'unavailable' rather than a zero."""
+        brand_id: UUID | None = None
+        raw = state.get("brand_profile_id")
+        if raw:
+            try:
+                brand_id = UUID(str(raw))
+            except ValueError:
+                brand_id = None
+        actions = LifecycleActions(self.session, actor_id=self._actor(state))
+        result = await actions.measure(brand_profile_id=brand_id)
+        return {
+            "analytics": result,
+            "phase": "measuring",
+            "lifecycle_stage": "measured" if result.get("available") else state.get("lifecycle_stage"),
+            "trace": [
+                _trace(
+                    "analytics_read",
+                    available=result.get("available"),
+                    ingested=result.get("ingested"),
+                )
+            ],
+        }
+
+    async def optimize(self, state: DirectorState) -> dict[str, Any]:
+        """Ask the growth analyst what to do next — recommendations only."""
+        brand = await self._brand(state)
+        ctx = self._ctx(state, brand, "growth_analyst")
+        measured = state.get("analytics") or {}
+        if not measured.get("available"):
+            return {
+                "optimizations": [],
+                "optimization_note": (
+                    "No measured performance is available yet, so no optimisation was "
+                    "proposed. Performance is read from the platform APIs; it is never "
+                    "inferred."
+                ),
+                "phase": "optimising",
+                "trace": [_trace("optimisation_skipped", reason="no_measurements")],
+            }
+        try:
+            agent = self.registry.get("growth_analyst")
+            result = await agent.run(
+                ctx,
+                {
+                    "brand_profile_id": str(brand.id) if brand else None,
+                    "window_days": 7,
+                    "focus": "engagement",
+                },
+            )
+            payload = result.model_dump(mode="json")
+        except Exception as exc:  # noqa: BLE001 - agent boundary
+            return {
+                "optimizations": [],
+                "optimization_note": f"Growth analysis failed: {type(exc).__name__}.",
+                "errors": [
+                    {
+                        "at": _now(),
+                        "stage": "optimize",
+                        "code": "growth_analysis_failed",
+                        "message": str(exc)[:300],
+                    }
+                ],
+                "phase": "optimising",
+            }
+
+        recommendations = []
+        for item in payload.get("recommendations") or []:
+            action = str(item.get("action", ""))
+            recommendations.append(
+                {
+                    **item,
+                    # Anything that touches spend is a founder decision, by rule.
+                    "requires_founder_approval": any(
+                        word in action.lower()
+                        for word in ("budget", "spend", "bid", "launch", "pause")
+                    ),
+                    "auto_applied": False,
+                }
+            )
+        return {
+            "optimizations": recommendations,
+            "optimization_note": (
+                f"{len(recommendations)} recommendation(s) from measure data_source="
+                f"'{payload.get('data_source', 'none')}'. None applied automatically."
+            ),
+            "lifecycle_stage": "optimised" if recommendations else "handed_off",
+            "phase": "optimising",
+            "trace": [
+                _trace(
+                    "optimisation_proposed",
+                    recommendations=len(recommendations),
+                    data_source=payload.get("data_source", "none"),
+                )
+            ],
+        }
+
+    def _actor(self, state: DirectorState) -> UUID | None:
+        raw = state.get("actor_id")
+        if not raw:
+            return None
+        try:
+            return UUID(str(raw))
+        except ValueError:
+            return None
+
+    # ------------------------------------------------------- apply decision
+    async def apply_decision(self, state: DirectorState) -> dict[str, Any]:
+        """Apply the founder's decision to every content item.
+
+        This runs *before* scheduling: the scheduler only accepts content the
+        approval service has actually moved to ``APPROVED``. Applying the decision
+        inside ``finalize`` (at the very end) meant the lifecycle nodes ran against
+        content that was still in review — a real ordering bug caught by the
+        lifecycle test.
+        """
         decision = state.get("approval_decision") or {}
         action = decision.get("action", "none")
-        actor_id = uuid.UUID(state["actor_id"]) if state.get("actor_id") else None
+        actor_id = self._actor(state)
 
         applied: list[dict[str, Any]] = []
         for item_id in state.get("content_item_ids") or []:
             try:
                 if action == "approve":
-                    item, record, _ = await self.approvals.apply(
-                        uuid.UUID(item_id),
+                    item, _, _ = await self.approvals.apply(
+                        UUID(str(item_id)),
                         "approve",
                         actor_id=actor_id,
                         actor_role="founder",
@@ -655,7 +823,7 @@ class DirectorNodes:
                     applied.append({"content_item_id": item_id, "status": item.status})
                 elif action == "request_changes":
                     item, _, _ = await self.approvals.apply(
-                        uuid.UUID(item_id),
+                        UUID(str(item_id)),
                         "request_changes",
                         actor_id=actor_id,
                         actor_role="founder",
@@ -664,7 +832,7 @@ class DirectorNodes:
                     applied.append({"content_item_id": item_id, "status": item.status})
                 elif action == "reject":
                     item, _, _ = await self.approvals.apply(
-                        uuid.UUID(item_id),
+                        UUID(str(item_id)),
                         "reject",
                         actor_id=actor_id,
                         actor_role="founder",
@@ -674,16 +842,47 @@ class DirectorNodes:
             except Exception as exc:  # noqa: BLE001
                 applied.append({"content_item_id": item_id, "error": str(exc)[:200]})
 
-        status = "completed" if action in {"approve", "reject", "request_changes"} else "completed"
         return {
-            "status": status,
+            "decision_applied": applied,
+            "phase": "decision_applied",
+            "trace": [_trace("decision_applied", action=action, items=len(applied))],
+        }
+
+    # ------------------------------------------------------------- finalize
+    async def finalize(self, state: DirectorState) -> dict[str, Any]:
+        decision = state.get("approval_decision") or {}
+        action = decision.get("action", "none")
+        applied = list(state.get("decision_applied") or [])
+        scheduled = len(state.get("scheduled_post_ids") or [])
+        blocked = len(state.get("schedule_blocked") or [])
+        publish = state.get("publish_results") or {}
+        analytics = state.get("analytics") or {}
+        optimizations = state.get("optimizations") or []
+        published_now = len(publish.get("published") or [])
+        deferred = len(publish.get("deferred") or [])
+        deferred_note = f", {deferred} left to the scheduler" if deferred else ""
+        measured_note = "yes" if analytics.get("available") else "not available"
+        return {
+            "status": "completed",
             "phase": "completed",
+            "lifecycle_stage": "handed_off",
             "summary": (
                 f"Workflow completed. Founder decision: {action}. "
-                f"{len(applied)} item(s) updated. Publishing remains a separate, "
-                "approval-gated action."
+                f"{len(applied)} item(s) updated. "
+                f"Scheduled: {scheduled} ({blocked} blocked). "
+                f"Published now: {published_now}{deferred_note}. "
+                f"Measured analytics: {measured_note}. "
+                f"Recommendations: {len(optimizations)} (none applied automatically)."
             ),
-            "trace": [_trace("finalized", action=action, items=len(applied))],
+            "trace": [
+                _trace(
+                    "finalized",
+                    action=action,
+                    items=len(applied),
+                    scheduled=scheduled,
+                    blocked=blocked,
+                )
+            ],
         }
 
     # --------------------------------------------------------- failure escape

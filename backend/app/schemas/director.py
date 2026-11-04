@@ -6,6 +6,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class WorkflowCancelRequest(BaseModel):
+    reason: str = Field(default="", max_length=500)
+
+
 class WorkflowStartRequest(BaseModel):
     brand_profile_id: uuid.UUID | None = None
     objective: str = Field(min_length=3, max_length=2000)
@@ -19,16 +23,30 @@ class WorkflowStartRequest(BaseModel):
 class WorkflowDecisionRequest(BaseModel):
     action: str = Field(pattern="^(approve|request_changes|reject)$")
     reason: str = Field(default="", max_length=2000)
+    #: Approving the copy is not the same as authorising CRUSOR to place it on a
+    #: calendar. Scheduling is opt-out, publishing-now is opt-in, and neither
+    #: overrides the approval gate the content itself must still pass.
+    schedule: bool = Field(
+        default=True,
+        description="Schedule the approved content on the connected accounts.",
+    )
+    publish_now: bool = Field(
+        default=False,
+        description="Publish immediately instead of waiting for the scheduled slot.",
+    )
+    horizon_days: int = Field(default=7, ge=1, le=30)
 
 
 class WorkflowStartResponse(BaseModel):
     workflow_id: str
     state: dict[str, Any]
+    reused: bool = False
 
 
 class WorkflowStatusResponse(BaseModel):
     workflow_id: str
     status: str | None = None
+    brand_profile_id: str | None = None
     phase: str | None = None
     next: list[str] = Field(default_factory=list)
     awaiting_human: bool = False
@@ -42,6 +60,14 @@ class WorkflowStatusResponse(BaseModel):
     content_item_ids: list[str] | None = None
     created_campaign_id: str | None = None
     summary: str | None = None
+    lifecycle_stage: str | None = None
+    schedule_plan: list[dict[str, Any]] | None = None
+    schedule_blocked: list[dict[str, Any]] | None = None
+    scheduled_post_ids: list[str] | None = None
+    publish_results: dict[str, Any] | None = None
+    analytics: dict[str, Any] | None = None
+    optimizations: list[dict[str, Any]] | None = None
+    optimization_note: str | None = None
     trace: list[dict[str, Any]] | None = None
     errors: list[dict[str, Any]] | None = None
     results: dict[str, Any] | None = None

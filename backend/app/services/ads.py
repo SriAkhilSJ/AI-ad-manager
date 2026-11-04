@@ -42,7 +42,14 @@ from app.core.errors import (
     NotFoundError,
     ValidationProblem,
 )
-from app.integrations.ads import get_ads_transport
+from app.integrations.ads import (
+    AdsAccountInvalid,
+    AdsNotConfigured,
+    AdsRequestRejected,
+    ExecutionResult,
+    get_ads_transport,
+    preview_fingerprint,
+)
 from app.models.ads import (
     AdAuthorizationStatus,
     AdBudgetAuthorization,
@@ -90,9 +97,17 @@ def _fingerprint(*parts: Any) -> str:
 
 
 class AdsService:
-    def __init__(self, session: AsyncSession, settings: Settings) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        settings: Settings,
+        *,
+        http_client: Any = None,
+    ) -> None:
         self.session = session
         self.settings = settings
+        #: Injected for tests (``httpx.MockTransport``); None means a real client.
+        self.http_client = http_client
 
     # ------------------------------------------------------------- proposals
     async def propose(
@@ -391,7 +406,7 @@ class AdsService:
             await self.session.flush()
             return op
 
-        transport = get_ads_transport(campaign.platform, self.settings)
+        transport = get_ads_transport(campaign.platform, self.settings, client=self.http_client)
         if not transport.available:
             # Checked before consuming the authorisation so a blocked launch does
             # not burn the founder's approval.
@@ -423,9 +438,28 @@ class AdsService:
             return op
 
         try:
-            result = await transport.execute(
+            result: ExecutionResult = await transport.execute(
                 campaign=campaign, kind=kind, params=params
             )
+        except AdsNotConfigured as exc:
+            # Credentials disappeared between the availability check and the call.
+            op = _record("refused", f"ads transport unavailable: {exc}", authorization.id)
+            await self.session.flush()
+            return op
+        except AdsAccountInvalid as exc:
+            op = _record("failed", f"ad account is not usable: {exc}", authorization.id,
+                         {"payload": exc.payload})
+            campaign.status = AdCampaignStatus.FAILED.value
+            self.session.add(campaign)
+            await self.session.flush()
+            return op
+        except AdsRequestRejected as exc:
+            op = _record("failed", f"platform rejected the request: {exc}"[:500], authorization.id,
+                         {"payload": exc.payload})
+            campaign.status = AdCampaignStatus.FAILED.value
+            self.session.add(campaign)
+            await self.session.flush()
+            return op
         except Exception as exc:  # noqa: BLE001 - transport boundary
             op = _record(
                 "failed",
@@ -437,30 +471,33 @@ class AdsService:
             await self.session.flush()
             return op
 
-        if not result.get("verified"):
+        if not result.verified:
             op = _record(
                 "unverified",
                 "the platform did not confirm the change; the campaign is not marked live",
                 authorization.id,
-                result,
+                result.as_dict(),
             )
             await self.session.flush()
             return op
 
-        op = _record("succeeded", f"{kind} confirmed by the platform", authorization.id, result)
+        op = _record("succeeded", f"{kind} confirmed by the platform", authorization.id, result.as_dict())
         await self.session.flush()
-        op_id = op.id
-        await self.session.execute(
-            update(AdBudgetAuthorization)
-            .where(AdBudgetAuthorization.id == authorization.id)
-            .values(consumed_by_operation_id=op_id)
-        )
-        campaign.external_campaign_id = result.get("external_campaign_id") or campaign.external_campaign_id
+        # Consumed through the ORM object, not a core UPDATE: the same session
+        # holds this row, and a bulk update would leave the in-memory copy stale
+        # for the caller (and for the founder's confirmation screen).
+        authorization.consumed_by_operation_id = op.id
+        self.session.add(authorization)
+        campaign.external_campaign_id = result.external_campaign_id or campaign.external_campaign_id
+        # Every transport creates paused, and the read-back above proved that is
+        # the remote state. So ``create`` lands as PAUSED here too: a local row
+        # that said "active" while the platform holds it paused would be a lie the
+        # founder could act on. Only a verified launch/resume is ACTIVE.
         campaign.status = (
             AdCampaignStatus.ACTIVE.value
-            if kind in {AdOperationKind.CREATE.value, AdOperationKind.LAUNCH.value, AdOperationKind.RESUME.value}
+            if kind in {AdOperationKind.LAUNCH.value, AdOperationKind.RESUME.value}
             else AdCampaignStatus.PAUSED.value
-            if kind == AdOperationKind.PAUSE.value
+            if kind in {AdOperationKind.CREATE.value, AdOperationKind.PAUSE.value}
             else campaign.status
         )
         campaign.last_synced_at = now
@@ -508,6 +545,68 @@ class AdsService:
         )
 
     def require_transport(self, platform: str) -> None:
-        transport = get_ads_transport(platform, self.settings)
+        transport = get_ads_transport(platform, self.settings, client=self.http_client)
         if not transport.available:
             raise IntegrationUnavailableError(transport.reason, details={"platform": platform})
+
+    # ------------------------------------------------------- preview / checks
+    async def preview(
+        self, campaign_id: uuid.UUID, *, kind: str = "create", params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Dry-run: the exact requests that *would* be sent. Sends nothing."""
+        campaign = await self.get(campaign_id)
+        if kind not in set(AdOperationKind.values()):
+            raise ValidationProblem(f"Unknown operation {kind!r}.")
+        transport = get_ads_transport(campaign.platform, self.settings, client=self.http_client)
+        preview = transport.preview(campaign=campaign, kind=kind, params=params or {})
+        return {
+            **preview,
+            "preview_fingerprint": preview_fingerprint(preview),
+            "proposal_hash": self.current_hash(campaign),
+            "authorised_hash": campaign.proposal_hash,
+            "hash_matches": self.current_hash(campaign) == campaign.proposal_hash,
+            "transport_available": transport.available,
+            "transport_reason": transport.reason,
+            "spends_money": False,
+        }
+
+    async def validate_account(self, campaign_id: uuid.UUID) -> dict[str, Any]:
+        """Read-only check that the credential can see a usable ad account."""
+        campaign = await self.get(campaign_id)
+        transport = get_ads_transport(campaign.platform, self.settings, client=self.http_client)
+        if not transport.available:
+            raise IntegrationUnavailableError(
+                transport.reason, details={"platform": campaign.platform}
+            )
+        return await transport.validate_account()
+
+    async def report(
+        self, campaign_id: uuid.UUID, *, record: bool = True
+    ) -> dict[str, Any]:
+        """Campaign performance, as measured by the platform."""
+        campaign = await self.get(campaign_id)
+        transport = get_ads_transport(campaign.platform, self.settings, client=self.http_client)
+        if not transport.available:
+            raise IntegrationUnavailableError(
+                transport.reason, details={"platform": campaign.platform}
+            )
+        if not campaign.external_campaign_id:
+            raise ValidationProblem(
+                "This campaign has no external id yet, so there is nothing to report on."
+            )
+        result = await transport.report(external_campaign_id=campaign.external_campaign_id)
+        if record:
+            self.session.add(
+                AdOperation(
+                    ad_campaign_id=campaign.id,
+                    authorization_id=None,
+                    kind=AdOperationKind.READ.value,
+                    outcome="succeeded" if result.get("available") else "unverified",
+                    detail="performance read",
+                    request_fingerprint=_fingerprint(campaign.id, "read", result.get("source", "")),
+                    evidence={"measured": result.get("measured", {}), "source": result.get("source")},
+                    actor_role="system",
+                )
+            )
+            await self.session.flush()
+        return result

@@ -85,7 +85,12 @@ CAPABILITIES: dict[str, dict[str, Capability]] = {
         "video_post": _cap("supported", True, "Reels/IGTV container with video_url"),
         "scheduling": _cap("supported", False, "not implemented"),
         "analytics": _cap("supported", True, "media insights"),
-        "paid_ads": _cap("supported", False, "Meta Marketing API not implemented"),
+        "paid_ads": _cap(
+            "supported",
+            False,
+            "Paid media is handled by app/integrations/ads.py (Meta/Google/LinkedIn "
+            "transports implemented, unverified), not by the publishing adapter",
+        ),
     },
     "linkedin": {
         "text_post": _cap("supported", True, "UGC Posts, shareMediaCategory NONE"),

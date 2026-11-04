@@ -24,6 +24,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from app.db.types import GUID
+
 revision: str = "e6f7a8b9c0d1"
 down_revision: Union[str, None] = "d5e6f7a8b9c0"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -36,10 +38,10 @@ AD_PLATFORMS = "'meta_ads','google_ads','linkedin_ads'"
 def upgrade() -> None:
     op.create_table(
         "oauth_tokens",
-        sa.Column("id", sa.CHAR(32), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "brand_profile_id",
-            sa.CHAR(32),
+            GUID(),
             sa.ForeignKey("brand_profiles.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -65,19 +67,19 @@ def upgrade() -> None:
 
     op.create_table(
         "oauth_flows",
-        sa.Column("id", sa.CHAR(32), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "brand_profile_id",
-            sa.CHAR(32),
+            GUID(),
             sa.ForeignKey("brand_profiles.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("platform", sa.String(32), nullable=False),
-        sa.Column("state", sa.String(255), nullable=False),
+        sa.Column("state", sa.String(1024), nullable=False),
         sa.Column("sealed_code_verifier", sa.Text(), nullable=True),
         sa.Column("redirect_uri", sa.String(1000), nullable=False, server_default=""),
         sa.Column("requested_scopes", sa.JSON(), nullable=False, server_default="[]"),
-        sa.Column("created_by", sa.CHAR(32), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("created_by", GUID(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("failure_reason", sa.Text(), nullable=False, server_default=""),
@@ -92,14 +94,14 @@ def upgrade() -> None:
 
     op.create_table(
         "ad_campaigns",
-        sa.Column("id", sa.CHAR(32), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "brand_profile_id",
-            sa.CHAR(32),
+            GUID(),
             sa.ForeignKey("brand_profiles.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("campaign_id", sa.CHAR(32), sa.ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("campaign_id", GUID(), sa.ForeignKey("campaigns.id", ondelete="SET NULL"), nullable=True),
         sa.Column("platform", sa.String(32), nullable=False),
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("objective", sa.String(64), nullable=False, server_default=""),
@@ -132,10 +134,10 @@ def upgrade() -> None:
 
     op.create_table(
         "ad_budget_authorizations",
-        sa.Column("id", sa.CHAR(32), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "ad_campaign_id",
-            sa.CHAR(32),
+            GUID(),
             sa.ForeignKey("ad_campaigns.id", ondelete="CASCADE"),
             nullable=False,
         ),
@@ -145,9 +147,9 @@ def upgrade() -> None:
         sa.Column("currency", sa.String(8), nullable=False, server_default="USD"),
         sa.Column("status", sa.String(32), nullable=False, server_default="active"),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("authorized_by", sa.CHAR(32), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("authorized_by", GUID(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("consumed_by_operation_id", sa.CHAR(32), nullable=True),
+        sa.Column("consumed_by_operation_id", GUID(), nullable=True),
         sa.Column("note", sa.Text(), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -168,16 +170,16 @@ def upgrade() -> None:
 
     op.create_table(
         "ad_operations",
-        sa.Column("id", sa.CHAR(32), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "ad_campaign_id",
-            sa.CHAR(32),
+            GUID(),
             sa.ForeignKey("ad_campaigns.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "authorization_id",
-            sa.CHAR(32),
+            GUID(),
             sa.ForeignKey("ad_budget_authorizations.id", ondelete="SET NULL"),
             nullable=True,
         ),
@@ -186,7 +188,7 @@ def upgrade() -> None:
         sa.Column("detail", sa.Text(), nullable=False, server_default=""),
         sa.Column("request_fingerprint", sa.String(64), nullable=False, server_default=""),
         sa.Column("evidence", sa.JSON(), nullable=False, server_default="{}"),
-        sa.Column("actor_id", sa.CHAR(32), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("actor_id", GUID(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("actor_role", sa.String(32), nullable=False, server_default="system"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),

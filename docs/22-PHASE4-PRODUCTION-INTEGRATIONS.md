@@ -281,6 +281,13 @@ policy, role boundaries.
 
 ---
 
+> **Superseded in part by Phase 4.2.** The paid-media transports this document
+> recorded as absent now exist (`app/integrations/ads.py`: Meta Graph v21.0,
+> Google Ads REST v17, LinkedIn 202405), together with preview/dry-run and
+> account validation. The Director lifecycle was also extended past the approval
+> interrupt. See [`26-PHASE4.2-RELEASE-READINESS.md`](26-PHASE4.2-RELEASE-READINESS.md)
+> and the generated [`25-platform-readiness.md`](25-platform-readiness.md).
+
 ## 5. Verification (local, 2026-11-04 UTC)
 
 | Check | Result |
@@ -331,8 +338,9 @@ U1–U7:                   UNRESOLVED
 PHASE 3C.3:              NO-GO — NOT STARTED
 
 SOCIAL TRANSPORTS:       IMPLEMENTED, MOCK-VERIFIED, NEVER LIVE-VERIFIED
-PAID MEDIA:              GOVERNANCE COMPLETE, TRANSPORTS ABSENT (REFUSED + RECORDED)
-PRODUCTION READINESS:    NOT CLAIMED — images and CI written, not executed
+PAID MEDIA:              GOVERNANCE COMPLETE; TRANSPORTS IMPLEMENTED IN PHASE 4.2
+                         (MOCK-VERIFIED, NEVER LIVE-VERIFIED) — SEE DOCS/26
+PRODUCTION READINESS:    NOT CLAIMED — images written, compose never executed here
 ```
 
 A founder can now run the full marketing cycle **except** the last mile: connect

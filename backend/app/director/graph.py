@@ -9,7 +9,14 @@ Topology (supervisor + conditional routing, **not** a sequential chain):
                                        └→ growth ───┘
     dispatch → review (when no runnable task remains)
     review → ensure_campaign → persist_drafts → request_approval
-           → human_approval (interrupt) → finalize → END
+           → human_approval (interrupt)
+           → schedule → publish → measure → optimize → finalize → END   (approved)
+           → finalize → END                                            (anything else)
+
+The post-approval branches are the second half of the promise: content that the
+founder approved is scheduled against a real connected account, published only if
+the founder said "publish now", measured from real analytics, and turned into
+recommendations that are never auto-applied.
 
 The loop back to ``dispatch`` means the execution order is decided by the state
 machine at run time, guided by task dependencies, not by edge order.
@@ -48,6 +55,16 @@ def _route_next_task(state: DirectorState) -> str:
     return "review"
 
 
+def _route_after_decision(state: DirectorState) -> str:
+    """Only an explicit approval continues into the external lifecycle."""
+    decision = state.get("approval_decision") or {}
+    if decision.get("action") != "approve":
+        return "finalize"
+    if decision.get("schedule", True) is False:
+        return "finalize"
+    return "schedule"
+
+
 def build_graph(nodes: DirectorNodes, checkpointer: Any = None):
     builder = StateGraph(DirectorState)
 
@@ -83,6 +100,11 @@ def build_graph(nodes: DirectorNodes, checkpointer: Any = None):
     builder.add_node("ensure_campaign", nodes.ensure_campaign)
     builder.add_node("persist_drafts", nodes.persist_drafts)
     builder.add_node("request_approval", nodes.request_approval)
+    builder.add_node("apply_decision", nodes.apply_decision)
+    builder.add_node("schedule", nodes.schedule)
+    builder.add_node("publish", nodes.publish)
+    builder.add_node("measure", nodes.measure)
+    builder.add_node("optimize", nodes.optimize)
     builder.add_node("finalize", nodes.finalize)
     builder.add_node("fail", nodes.fail)
 
@@ -133,7 +155,16 @@ def build_graph(nodes: DirectorNodes, checkpointer: Any = None):
     builder.add_edge("ensure_campaign", "persist_drafts")
     builder.add_edge("persist_drafts", "request_approval")
     builder.add_edge("request_approval", "human_approval")
-    builder.add_edge("human_approval", "finalize")
+    builder.add_edge("human_approval", "apply_decision")
+    builder.add_conditional_edges(
+        "apply_decision",
+        _route_after_decision,
+        {"schedule": "schedule", "finalize": "finalize"},
+    )
+    builder.add_edge("schedule", "publish")
+    builder.add_edge("publish", "measure")
+    builder.add_edge("measure", "optimize")
+    builder.add_edge("optimize", "finalize")
     builder.add_edge("finalize", END)
     builder.add_edge("fail", END)
 
@@ -154,6 +185,11 @@ def graph_topology() -> dict[str, Any]:
             "persist_drafts",
             "request_approval",
             "human_approval",
+            "apply_decision",
+            "schedule",
+            "publish",
+            "measure",
+            "optimize",
             "finalize",
             "fail",
         ],
@@ -167,7 +203,12 @@ def graph_topology() -> dict[str, Any]:
             ["ensure_campaign", "persist_drafts"],
             ["persist_drafts", "request_approval"],
             ["request_approval", "human_approval"],
-            ["human_approval", "finalize"],
+            ["human_approval", "apply_decision"],
+            ["apply_decision", "schedule|finalize"],
+            ["schedule", "publish"],
+            ["publish", "measure"],
+            ["measure", "optimize"],
+            ["optimize", "finalize"],
             ["finalize", "END"],
         ],
         "interrupts": ["human_approval"],

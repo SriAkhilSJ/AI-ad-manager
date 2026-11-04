@@ -17,7 +17,10 @@ from app.api.deps import DB, CurrentUser, EditorUser, FounderUser, SettingsDep
 from app.integrations.ads import ads_transport_report, get_ads_transport
 from app.models.ads import AdBudgetAuthorization
 from app.schemas.ads import (
+    AdAccountValidationOut,
     AdAuthorizeIn,
+    AdPreviewOut,
+    AdReportOut,
     AdAuthorizationOut,
     AdCampaignDetailOut,
     AdCampaignOut,
@@ -123,6 +126,47 @@ async def campaign_detail(
             **get_ads_transport(campaign.platform, settings).describe()
         ),
     )
+
+
+@router.post(
+    "/campaigns/{campaign_id}/preview",
+    response_model=AdPreviewOut,
+    summary="Dry run: the exact requests that would be sent, without sending them",
+)
+async def preview(
+    campaign_id: uuid.UUID,
+    session: DB,
+    settings: SettingsDep,
+    user: CurrentUser,
+    kind: str = "create",
+) -> AdPreviewOut:
+    result = await AdsService(session, settings).preview(campaign_id, kind=kind)
+    return AdPreviewOut(**result)
+
+
+@router.post(
+    "/campaigns/{campaign_id}/validate-account",
+    response_model=AdAccountValidationOut,
+    summary="Read-only check that the credential reaches a usable ad account",
+)
+async def validate_account(
+    campaign_id: uuid.UUID, session: DB, settings: SettingsDep, user: FounderUser
+) -> AdAccountValidationOut:
+    result = await AdsService(session, settings).validate_account(campaign_id)
+    return AdAccountValidationOut(**result)
+
+
+@router.get(
+    "/campaigns/{campaign_id}/report",
+    response_model=AdReportOut,
+    summary="Campaign performance as measured by the platform",
+)
+async def report(
+    campaign_id: uuid.UUID, session: DB, settings: SettingsDep, user: CurrentUser
+) -> AdReportOut:
+    result = await AdsService(session, settings).report(campaign_id)
+    await session.commit()
+    return AdReportOut(**result)
 
 
 @router.post(

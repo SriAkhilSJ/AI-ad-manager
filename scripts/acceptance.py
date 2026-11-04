@@ -846,10 +846,16 @@ def main() -> int:
         decision = next(e for e in status["trace"] if e["entry"] == "research_decision")
         reused = int(decision.get("existing_findings") or 0)
         if decision.get("needed"):
-            assert "research_run" in entries, entries
+            # The runtime records the round as ``research_completed`` (it never
+            # emitted a ``research_run`` label), so the old assertion could only
+            # pass in the reuse branch. Accept the entry the code actually writes.
+            assert "research_completed" in entries, entries
             rounds = status["research_rounds"]
-            assert rounds and rounds[0]["findings"] > 0, "a research round produced nothing"
-            evidence_note = f"ran {len(rounds)} round(s), {rounds[0]['findings']} findings"
+            # The workflow records ``findings_created`` per round (it never used a
+            # bare ``findings`` key), so the check reads the field the API returns.
+            produced = int(rounds[0].get("findings_created", rounds[0].get("findings", 0))) if rounds else 0
+            assert rounds and produced > 0, "a research round produced nothing"
+            evidence_note = f"ran {len(rounds)} round(s), {produced} findings"
         else:
             assert reused > 0, "research was skipped with no evidence to reuse"
             assert "evidence_evaluated" not in entries or True

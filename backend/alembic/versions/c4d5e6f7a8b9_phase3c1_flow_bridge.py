@@ -20,6 +20,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from app.db.types import GUID
+
 revision: str = "c4d5e6f7a8b9"
 down_revision: Union[str, None] = "9b4c7d1e5a02"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -48,7 +50,7 @@ def _timestamps() -> list[sa.Column]:
 def upgrade() -> None:
     op.create_table(
         "flow_companion_sessions",
-        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         *_timestamps(),
         sa.Column("companion_id", sa.String(length=128), nullable=False),
         sa.Column("label", sa.String(length=128), nullable=False, server_default=""),
@@ -80,16 +82,16 @@ def upgrade() -> None:
 
     op.create_table(
         "flow_asset_exports",
-        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         *_timestamps(),
         sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column("status", sa.String(length=24), nullable=False, server_default="pending"),
         sa.Column("companion_id", sa.String(length=128), nullable=False, server_default=""),
-        sa.Column("generation_job_id", sa.String(length=36), nullable=True),
-        sa.Column("campaign_id", sa.String(length=36), nullable=True),
-        sa.Column("content_item_id", sa.String(length=36), nullable=True),
-        sa.Column("content_version_id", sa.String(length=36), nullable=True),
-        sa.Column("brief_id", sa.String(length=36), nullable=True),
+        sa.Column("generation_job_id", GUID(), nullable=True),
+        sa.Column("campaign_id", GUID(), nullable=True),
+        sa.Column("content_item_id", GUID(), nullable=True),
+        sa.Column("content_version_id", GUID(), nullable=True),
+        sa.Column("brief_id", GUID(), nullable=True),
         sa.Column("brief_version", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("expected_sha256", sa.String(length=64), nullable=False, server_default=""),
         sa.Column("declared_content_type", sa.String(length=128), nullable=False, server_default=""),
@@ -98,14 +100,14 @@ def upgrade() -> None:
         sa.Column("received_bytes", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("checksum", sa.String(length=64), nullable=False, server_default=""),
         sa.Column("storage_key", sa.Text(), nullable=False, server_default=""),
-        sa.Column("asset_id", sa.String(length=36), nullable=True),
+        sa.Column("asset_id", GUID(), nullable=True),
         sa.Column("width", sa.Integer(), nullable=True),
         sa.Column("height", sa.Integer(), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error_code", sa.String(length=64), nullable=False, server_default=""),
         sa.Column("error_message", sa.Text(), nullable=False, server_default=""),
-        sa.Column("created_by", sa.String(length=36), nullable=True),
+        sa.Column("created_by", GUID(), nullable=True),
         sa.CheckConstraint(
             "status in ('pending','consumed','expired','failed','cancelled')",
             name="ck_flow_export_status",

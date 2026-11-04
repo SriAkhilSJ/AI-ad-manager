@@ -92,7 +92,9 @@ class OAuthFlow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         GUID(), ForeignKey("brand_profiles.id", ondelete="CASCADE"), nullable=False, index=True
     )
     platform: Mapped[str] = mapped_column(String(32), nullable=False)
-    state: Mapped[str] = mapped_column(String(255), nullable=False)
+    # HMAC-signed, base64url payload: ~300 characters today. 255 was too short
+    # for PostgreSQL, which enforces the limit that SQLite silently ignored.
+    state: Mapped[str] = mapped_column(String(1024), nullable=False)
     # Sealed PKCE verifier: useless without TOKEN_VAULT_KEY.
     sealed_code_verifier: Mapped[str | None] = mapped_column(Text, nullable=True)
     redirect_uri: Mapped[str] = mapped_column(String(1000), nullable=False, default="")

@@ -141,7 +141,9 @@ class Settings(BaseSettings):
     #: free: it renders a real PNG frame and never calls a model. ``flow`` selects
     #: the Google Flow adapter, which fails closed because the Connector source is
     #: not available. ``disabled`` refuses every generation attempt.
-    creative_provider: Literal["mock", "flow", "disabled"] = "mock"
+    creative_provider: Literal[
+        "mock", "flow", "disabled", "openai", "replicate", "openai+replicate"
+    ] = "mock"
     #: Real generation spends money. It stays off until a founder authorises it in
     #: configuration *and* a provider with verified pricing exists.
     creative_allow_paid_generation: bool = False
@@ -159,6 +161,23 @@ class Settings(BaseSettings):
     #: Verified USD price per generation, keyed by ``image`` / ``video``. An empty
     #: map means "price unknown", which blocks paid generation instead of costing $0.
     creative_pricing_json: dict[str, Any] = Field(default_factory=dict)
+
+    # ---- Phase 4.2: real creative providers ----------------------------
+    # One provider per medium, each with its OWN credential. ``mock`` keeps the
+    # deterministic renderer; anything else is a billable external service and
+    # stays refused until a verified price and a non-zero budget exist.
+    creative_image_provider: Literal["mock", "openai", "disabled"] = "mock"
+    creative_video_provider: Literal["mock", "replicate", "disabled"] = "mock"
+    openai_image_model: str = "gpt-image-1"
+    openai_base_url: str = "https://api.openai.com/v1"
+    replicate_api_token: str | None = None
+    #: A pinned ``owner/model:version``. Deliberately empty: pinning a model is a
+    #: founder decision, not a default this code invents.
+    replicate_video_model: str = ""
+    replicate_base_url: str = "https://api.replicate.com/v1"
+    #: Scratch space for assets between submission and retrieval. A restart between
+    #: the two loses the cached bytes; the job then fails loudly and regenerates.
+    creative_provider_cache_dir: str = "/tmp/crusor-creative"
 
     # ---- Phase 3C.1 Flow bridge + local companion ------------------------
     #: The bridge is a *local* service. It refuses to start unless the bind host is
@@ -325,6 +344,18 @@ class Settings(BaseSettings):
     # Paid ads are gated on a founder authorisation; this is the maximum a single
     # authorisation may cover, as a second line of defence against a typo.
     ads_max_authorized_spend_cents: int = 5_000_00
+
+    # ---- paid advertising transports (Phase 4.2) -----------------------
+    # Each platform has its OWN credentials. There is no shared ads token, and a
+    # missing triple makes that transport report unavailable rather than
+    # half-working.
+    meta_ads_access_token: str | None = None
+    meta_ads_account_id: str | None = None
+    google_ads_access_token: str | None = None
+    google_ads_developer_token: str | None = None
+    google_ads_login_customer_id: str | None = None
+    linkedin_ads_access_token: str | None = None
+    linkedin_ads_account_urn: str | None = None
 
     # ------------------------------------------------------------------ #
     @field_validator(

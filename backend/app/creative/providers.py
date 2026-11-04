@@ -382,14 +382,56 @@ def _iso(stamp: float | None) -> str:
     return moment.isoformat()
 
 
+def configured_provider_name(settings: Settings) -> str:
+    """The provider name the operator asked for, as the service must compare it.
+
+    With per-medium providers configured the effective provider is the pair, so
+    the paid-provider identity check compares against ``"openai+replicate"``
+    rather than either half.
+    """
+    image = (getattr(settings, "creative_image_provider", "mock") or "mock").lower()
+    video = (getattr(settings, "creative_video_provider", "mock") or "mock").lower()
+    if image != "mock" or video != "mock":
+        return f"{image}+{video}"
+    return (getattr(settings, "creative_provider", "mock") or "mock").lower()
+
+
 def get_creative_provider(settings: Settings | None = None) -> CreativeProvider:
-    """Resolve the configured provider. Mock is the default and the only one wired."""
+    """Resolve the configured provider.
+
+    Per-medium providers win: they express "generate images with X and video with
+    Y", which a single ``CREATIVE_PROVIDER`` value cannot. ``mock`` remains the
+    default so nothing billable happens without an explicit decision.
+    """
     settings = settings or get_settings()
+    image = (getattr(settings, "creative_image_provider", "mock") or "mock").lower()
+    video = (getattr(settings, "creative_video_provider", "mock") or "mock").lower()
+    if image != "mock" or video != "mock":
+        from app.creative.remote import (
+            CompositeCreativeProvider,
+            OpenAIImagesProvider,
+            ReplicateVideoProvider,
+            build_provider,
+        )
+
+        image_provider = build_provider(image, settings) or MockCreativeProvider(settings)
+        video_provider = build_provider(video, settings) or MockCreativeProvider(settings)
+        if isinstance(image_provider, MockCreativeProvider) and isinstance(
+            video_provider, MockCreativeProvider
+        ):
+            return MockCreativeProvider(settings)
+        return CompositeCreativeProvider(image_provider, video_provider)
+
     choice = (getattr(settings, "creative_provider", "mock") or "mock").lower()
     if choice == "mock":
         return MockCreativeProvider(settings)
     if choice == "flow":
         return FlowCreativeProvider()
+    from app.creative.remote import build_provider
+
+    remote = build_provider(choice, settings)
+    if remote is not None:
+        return remote
     return DisabledCreativeProvider()
 
 
@@ -411,6 +453,10 @@ def creative_provider_status(settings: Settings | None = None) -> dict[str, Any]
             "is unknown and no adapter is active."
         ),
     }
+
+    remote_report = _remote_status(settings)
+    if remote_report is not None:
+        return remote_report
 
     if choice == "mock":
         return {
@@ -454,6 +500,81 @@ def creative_provider_status(settings: Settings | None = None) -> dict[str, Any]
         "live_generation_enabled": False,
         "paid_authorised": paid_authorised,
         "note": "Creative generation is disabled (CREATIVE_PROVIDER=disabled).",
+    }
+
+
+def _remote_status(settings: Settings) -> dict[str, Any] | None:
+    """Readiness of the configured real providers, including what is missing."""
+    image = (getattr(settings, "creative_image_provider", "mock") or "mock").lower()
+    video = (getattr(settings, "creative_video_provider", "mock") or "mock").lower()
+    if image == "mock" and video == "mock":
+        return None
+
+    from app.creative.remote import (
+        OpenAIImagesProvider,
+        ReplicateVideoProvider,
+        build_provider,
+        describe_requirement,
+    )
+
+    entries: dict[str, Any] = {}
+    ready = True
+    for medium, choice in (("image", image), ("video", video)):
+        provider = build_provider(choice, settings)
+        if provider is None:
+            entries[medium] = {
+                "provider": choice,
+                "configured": choice not in {"disabled"},
+                "available": False,
+                "missing": "provider disabled" if choice == "disabled" else "",
+                "billable": choice != "disabled",
+            }
+            ready = ready and choice == "disabled"
+            continue
+        available = bool(getattr(provider, "available", False))
+        ready = ready and available
+        entries[medium] = {
+            "provider": provider.name,
+            "configured": True,
+            "available": available,
+            "missing": describe_requirement(provider),
+            "billable": True,
+        }
+
+    paid_authorised = bool(getattr(settings, "creative_allow_paid_generation", False))
+    budget = float(getattr(settings, "creative_campaign_budget_usd", 0.0) or 0.0)
+    pricing = getattr(settings, "creative_pricing_json", None) or {}
+    priced = all(bool(pricing.get(kind)) for kind in ("image", "video") if entries.get(kind, {}).get("billable"))
+    blocked = []
+    if not ready:
+        blocked.append("provider credentials missing")
+    if not paid_authorised:
+        blocked.append("CREATIVE_ALLOW_PAID_GENERATION is false")
+    if budget <= 0:
+        blocked.append("CREATIVE_CAMPAIGN_BUDGET_USD is zero")
+    if not priced:
+        blocked.append("CREATIVE_PRICING_JSON has no verified price for a billable medium")
+    return {
+        "flow_connector": {
+            "integration": "google_flow_connector",
+            "status": "not_available",
+            "available": False,
+            "note": "Flow remains disabled; a supported provider is configured instead.",
+        },
+        "provider": configured_provider_name(settings),
+        "providers": entries,
+        "status": "ready" if not blocked else "configured_but_blocked",
+        "available": bool(ready and paid_authorised and budget > 0),
+        "is_mock": False,
+        "billable": True,
+        "paid_generation_enabled": paid_authorised,
+        "live_generation_enabled": bool(ready and paid_authorised and budget > 0),
+        "video_playback": "encoded" if entries.get("video", {}).get("available") else "none",
+        "blocked_by": blocked,
+        "note": (
+            "Real providers are configured. Nothing is generated until paid generation "
+            "is authorised, a verified price exists and the budget is non-zero."
+        ),
     }
 
 

@@ -12,6 +12,7 @@ from app.core.idempotency import with_idempotency
 from app.director.graph import graph_topology
 from app.director.runtime import WorkflowRuntime
 from app.schemas.director import (
+    WorkflowCancelRequest,
     WorkflowDecisionRequest,
     WorkflowStartRequest,
     WorkflowStartResponse,
@@ -66,6 +67,7 @@ async def start_workflow(
         return {
             "workflow_id": cache["workflow_id"],
             "state": cache["state"],
+            "reused": cache.get("reused", False),
         }
 
     result, _replayed = await with_idempotency(
@@ -117,8 +119,33 @@ async def workflow_decision(
     runtime = WorkflowRuntime()
     await runtime.resume(
         workflow_id,
-        decision={"action": payload.action, "reason": payload.reason},
+        decision={
+            "action": payload.action,
+            "reason": payload.reason,
+            "schedule": payload.schedule,
+            "publish_now": payload.publish_now,
+            "horizon_days": payload.horizon_days,
+        },
         actor_id=founder.id,
+    )
+    return WorkflowStatusResponse(**await runtime.status(workflow_id))
+
+
+@router.post(
+    "/workflows/{workflow_id}/cancel",
+    response_model=WorkflowStatusResponse,
+    summary="Cancel a workflow (founder or editor); it cannot be resumed afterwards",
+)
+async def cancel_workflow(
+    workflow_id: str,
+    founder: FounderUser,
+    payload: WorkflowCancelRequest | None = None,
+) -> WorkflowStatusResponse:
+    runtime = WorkflowRuntime()
+    await runtime.cancel(
+        workflow_id,
+        actor_id=founder.id,
+        reason=(payload.reason if payload else ""),
     )
     return WorkflowStatusResponse(**await runtime.status(workflow_id))
 

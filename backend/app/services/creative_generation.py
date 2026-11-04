@@ -133,7 +133,9 @@ class CreativeGenerationService:
         # --- authorisation + budget, before any request exists --------------
         estimate, price_verified = self._estimate_cost(brief, job_type, capabilities)
         if capabilities.billable:
-            configured = (getattr(self.settings, "creative_provider", "mock") or "mock").lower()
+            from app.creative.providers import configured_provider_name
+
+            configured = configured_provider_name(self.settings)
             if configured != capabilities.provider.lower():
                 # A billable provider must be the one the operator configured by name,
                 # otherwise we cannot say who would be charged.

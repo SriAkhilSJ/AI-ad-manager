@@ -27,14 +27,23 @@ its exact proposal hash.
 | **Platform transports (publish + verify + metrics)** | implemented, mock-tested, **never live-verified** |
 | **Analytics ingestion from platform APIs** | implemented, mock-tested, **never live-verified** |
 | **Scheduled publishing (due-post runner + Celery job)** | implemented, mock-tested |
+| **Director lifecycle (goal → … → approval → schedule → publish → measure → optimise)** | implemented, mock-tested end-to-end, durable across restarts |
 | **Paid-media governance (proposal → authorisation → ledger)** | implemented, mock-tested |
-| **Paid-media transports (Meta/Google/LinkedIn Ads)** | **not implemented** — refused and recorded |
+| **Paid-media transports (Meta Graph v21.0 / Google Ads REST v17 / LinkedIn 202405)** | implemented with preview + dry-run + read-back; mock-tested, **never live-verified** |
+| **Creative providers (OpenAI Images, Replicate video)** | implemented behind price/budget/authorisation gates; mock-tested, **never live-verified** |
 | Google Flow / DeepX bridge | implemented behind provenance gates; **blocked** (source, release and installed artifact unverifiable) |
-| Docker, compose, CI | written; not executed in the authoring environment |
+| **PostgreSQL 16 + pgvector + Redis + Celery** | verified locally (migrations, full suite, broker round-trip); CI job added |
+| Docker, compose | written and reviewed; **not executed** — Docker is unavailable in the authoring environment |
 
 The full five-column matrix — implemented / mock-tested / sandbox-verified /
-production-verified / blocked — is in
-[`docs/22-PHASE4-PRODUCTION-INTEGRATIONS.md`](docs/22-PHASE4-PRODUCTION-INTEGRATIONS.md).
+production-verified / blocked — lives in
+[`docs/25-platform-readiness.md`](docs/25-platform-readiness.md), which is
+generated from the code and the live environment by
+`scripts/platform_readiness.py` (so it cannot claim a verification the build has
+not performed). The Phase 4.1 matrix and its narrative are in
+[`docs/22-PHASE4-PRODUCTION-INTEGRATIONS.md`](docs/22-PHASE4-PRODUCTION-INTEGRATIONS.md);
+the Phase 4.2 record is
+[`docs/26-PHASE4.2-RELEASE-READINESS.md`](docs/26-PHASE4.2-RELEASE-READINESS.md).
 
 ```text
 RELEASE ANCHOR:          MISSING
@@ -43,6 +52,8 @@ OVERALL PROVENANCE:      UNVERIFIED
 LIVE FLOW GENERATION:    DISABLED
 U1–U7:                   UNRESOLVED
 PHASE 3C.3:              NO-GO — NOT STARTED
+DOCKER COMPOSE:          NOT EXECUTED (docker unavailable in the authoring sandbox)
+PRODUCTION READINESS:    NOT CLAIMED
 ```
 
 ---
@@ -136,7 +147,23 @@ metric is shown as "not reported" rather than drawn as zero.
   blocked launch does not burn it.
 * `ad_operations` records every attempt, including refusals.
 
-### 6. Capabilities are never overstated
+### 6. The Director's autonomy stops at the founder's signature
+
+* The graph halts on a real LangGraph `interrupt`; resuming without a decision is
+  impossible and only a founder may resume it.
+* Approving the copy is **not** consent to schedule or publish. The decision body
+  carries `schedule` (default true) and `publish_now` (default false), both of
+  which are persisted with the decision.
+* Scheduling only touches content the approval service has already moved to
+  `APPROVED`, and only on an account that is *connected* — a stored row is not an
+  authorisation.
+* Measurement reports `unavailable` when no platform returned numbers, and
+  optimisation produces recommendations with `auto_applied: false`; anything that
+  would move money is flagged `requires_founder_approval`.
+* Cancelling a workflow makes it unresumable without deleting the checkpoints that
+  record what it had already done.
+
+### 7. Capabilities are never overstated
 
 `GET /api/v1/social/platforms` reports, per platform, whether credentials exist,
 whether a vault exists, whether publishing is therefore enabled, and — per
@@ -161,7 +188,12 @@ backend/
                    social, usage
     agents/        research, strategy, content, creative, brand_guardian,
                    growth_analyst + registry and a shared base contract
-    director/      LangGraph state, checkpointer, nodes, graphs, runtimes
+    director/      LangGraph state, checkpointer, nodes, graphs, runtimes,
+                   lifecycle (schedule → publish → measure → optimise)
+    creative/      contracts, media inspection, providers (mock, Flow boundary,
+                   OpenAI images, Replicate video)
+    integrations/  OAuth, token vault, social transports, ads transports
+                   (Meta Graph v2x, Google Ads REST, LinkedIn Marketing)
     llm/           provider-independent gateway, routing, budgets, cost
     integrations/  token vault (AES-GCM), OAuth, HTTP policy, platform
                    transports, ads transports, capability matrix
@@ -190,7 +222,7 @@ docker-compose.yml    PG16 + Redis + backend + worker + frontend
 
 ```bash
 cd backend
-../.venv/bin/python -m pytest tests          # 1204 tests
+../.venv/bin/python -m pytest tests          # 1274 tests
 npx tsc --noEmit --project ../frontend       # or: cd ../frontend && npx tsc --noEmit
 cd ../frontend && npm run build
 
@@ -199,7 +231,22 @@ cd ../backend && ../.venv/bin/python ../scripts/acceptance.py --base-url http://
 ```
 
 The acceptance script exits non-zero if any criterion fails and writes
-`docs/acceptance-run.json`.
+`docs/acceptance-run.json`. Its last full run against a live server was
+**65/65 PASS** (which itself includes a 1274-test, 0-failure suite run).
+
+Recorded on 2026-11-04 (UTC), Phase 4.2:
+
+| Run | Result |
+| --- | --- |
+| Backend suite, SQLite | 1274 tests, 0 failures, 0 errors |
+| Backend suite, PostgreSQL 16.2 + pgvector, `-n 4` | 1274 tests, 0 failures, 0 errors (832.7 s) |
+| Acceptance harness, live server | 65/65 PASS |
+| Frontend `tsc --noEmit` / `npm run build` | exit 0 / build OK |
+| Broker round-trip (Redis + Celery) | 3/3 tasks SUCCESS |
+
+What those runs do **not** prove: that Meta, Google Ads, LinkedIn, OpenAI or
+Replicate accept our requests. Every one of those is mocked here and marked
+`never live-verified` until someone runs it with real credentials.
 
 `scripts/flow_source_audit.py` is expected to exit **3** with `SOURCE_ABSENT`. That
 is the gate working: the DeepX source is not in this repository and must never be
@@ -223,8 +270,10 @@ written to logs (structlog redacts secret-bearing keys and bearer tokens).
 `OAUTH_REDIRECT_BASE_URL`, plus each platform's own `*_CLIENT_*` pair.
 
 **Optional, each reporting `unavailable` with a reason until configured:**
-LLM provider keys, Redis/Celery, S3 storage, ads transport credentials (none exist
-yet), Flow provenance material.
+LLM provider keys, Redis/Celery, S3 storage, paid-media credentials
+(`META_ADS_*`, `GOOGLE_ADS_*`, `LINKEDIN_ADS_*`), creative provider credentials
+(`OPENAI_API_KEY` / `REPLICATE_API_TOKEN` with pinned pricing), Flow provenance
+material.
 
 The complete table, including what each missing value disables and what the founder
 must provision, is in

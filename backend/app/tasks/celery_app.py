@@ -36,6 +36,10 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
 )
 
+# Explicit, because autodiscover looks for ``app.tasks.tasks`` and this package
+# keeps its tasks in ``app.tasks.jobs``. Without this the worker starts happily
+# and then rejects ``crusor.run_job`` at delivery time as unregistered.
+celery_app.conf.imports = ("app.tasks.jobs",)
 celery_app.autodiscover_tasks(["app.tasks"])
 
 

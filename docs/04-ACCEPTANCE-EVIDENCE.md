@@ -270,3 +270,49 @@ sign-off:
   concurrency-tested on SQLite.
 * **R11** — the rate limiter is in-process unless `REDIS_URL` is set, so limits
   are per-replica until then.
+
+---
+
+## Phase 4.2 evidence (2026-11-04 UTC)
+
+This section records what was executed, on which dialect, and what it does **not**
+establish. The narrative and the blocker list are in
+[`26-PHASE4.2-RELEASE-READINESS.md`](26-PHASE4.2-RELEASE-READINESS.md).
+
+### Executed
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Full backend suite, SQLite | `pytest tests` | 1274 tests, 0 failures, 0 errors (`EXIT:0`) |
+| Full backend suite, PostgreSQL 16.2 + pgvector 0.6.2 | `CRUSOR_TEST_DATABASE_URL=… pytest tests -n 4` | 1274 tests, 0 failures, 0 errors, 832.7 s |
+| Alembic on PostgreSQL | `alembic upgrade head` / `downgrade` / `upgrade` | applies and reverses clean; head `e6f7a8b9c0d1` |
+| Acceptance harness, live server | `scripts/acceptance.py --base-url http://127.0.0.1:8000` | **65/65 PASS**, evidence in `acceptance-run.json` |
+| Phase 4.2 modules | director lifecycle 14, ads transports 30, creative providers 23, E2E lifecycle 3, social integrations 44 | **114 passed**, 0 failures |
+| Broker round trip | `scripts/celery_roundtrip.py` against Redis 6.2.14 + Celery worker | 3 tasks, all `SUCCESS` |
+| Frontend | `tsc --noEmit`, `npm run build` | exit 0; build OK |
+| Readiness matrix | `scripts/platform_readiness.py --write` | `docs/25-platform-readiness.md` regenerated; no verification claims upgraded |
+
+### Not executed, and therefore not claimed
+
+* **Docker Compose** — Docker is unavailable in the authoring environment. The
+  compose file exists and the CI `backend-postgres` job runs the same services
+  (PostgreSQL + pgvector, Redis) against the suite, but no compose run has been
+  recorded here. Do not describe compose as passing.
+* **Any live platform call** — Meta, Google Ads, LinkedIn, X, Reddit, YouTube,
+  OpenAI Images and Replicate were exercised only through deterministic fakes and
+  transport-level unit tests. No request left this environment.
+* **Any spend** — no ad was created, no paid generation was submitted. Both paths
+  refuse without an explicit founder authorisation and a verified price.
+* **Flow / DeepX** — still `SOURCE_ABSENT`; the gate exits 3 by design.
+
+### Fixed while verifying (real defects, not test tweaks)
+
+* Three migrations declared `String(36)`/`CHAR(32)` where the models use the
+  dialect-aware `GUID()` type — invisible on SQLite, a type mismatch on PostgreSQL.
+* `integration.state` was too narrow for 317-character OAuth state values used
+  with the PostgreSQL driver.
+* `autodiscover_tasks` missed `app.tasks.jobs`, so a worker booted without the
+  publishing jobs registered.
+* Two acceptance assertions referenced runtime fields that do not exist
+  (`research_run`, `research_rounds[].findings`), so criterion 19 could only pass
+  in one branch. They now assert what the graph actually emits.

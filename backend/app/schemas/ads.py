@@ -107,8 +107,47 @@ class AdTransportOut(BaseModel):
     implemented: bool
     credentials_configured: bool
     available: bool
+    verification: str = "unverified"
     reason: str
     docs_url: str
+    api_version: str = ""
+
+
+class AdPreviewOut(BaseModel):
+    platform: str
+    kind: str
+    endpoint: str
+    requests: list[dict[str, Any]]
+    estimated_daily_spend: str
+    currency: str
+    created_paused: bool
+    preview_fingerprint: str
+    proposal_hash: str
+    authorised_hash: str
+    hash_matches: bool
+    transport_available: bool
+    transport_reason: str
+    spends_money: bool
+    note: str = ""
+    idempotency: str = ""
+
+
+class AdAccountValidationOut(BaseModel):
+    platform: str
+    external_account_id: str
+    name: str = ""
+    currency: str = ""
+    account_status: Any = None
+    timezone: str = ""
+    usable: bool
+
+
+class AdReportOut(BaseModel):
+    platform: str
+    source: str
+    measured: dict[str, Any]
+    available: bool
+    note: str
 
 
 class AdCampaignDetailOut(BaseModel):

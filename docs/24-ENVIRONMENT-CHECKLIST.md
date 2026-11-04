@@ -122,3 +122,46 @@ Expected until credentials exist: `publishing.status = "unavailable"`,
 `publish_enabled: false` everywhere, every ads transport `available: false` with a
 reason naming the missing approval. Anything else means something is configured
 that you did not intend to configure.
+
+
+---
+
+## Phase 4.2 additions
+
+### Paid-media transports (each platform's own credentials; never shared)
+
+| Variable | Platform | Needed for |
+| --- | --- | --- |
+| `META_ADS_ACCESS_TOKEN` | Meta Marketing API | campaign/adset/creative/ad creation, insights |
+| `META_ADS_ACCOUNT_ID` | Meta Marketing API | the numeric `act_…` account |
+| `GOOGLE_ADS_ACCESS_TOKEN` | Google Ads API | OAuth access token |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API | approved developer token |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | Google Ads API | customer id with billing |
+| `LINKEDIN_ADS_ACCESS_TOKEN` | LinkedIn Ads | Advertising API token |
+| `LINKEDIN_ADS_ACCOUNT_URN` | LinkedIn Ads | `urn:li:sponsoredAccount:…` |
+
+`GET /api/v1/ads/transports` reports, per platform, `implemented`,
+`credentials_configured`, `available`, `verification` (always `unverified` until a
+live call is recorded) and the exact missing variables.
+
+### Creative providers
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CREATIVE_IMAGE_PROVIDER` | `mock` | `mock` / `openai` / `disabled` |
+| `CREATIVE_VIDEO_PROVIDER` | `mock` | `mock` / `replicate` / `disabled` |
+| `OPENAI_API_KEY` | unset | image provider credential |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-1` | |
+| `REPLICATE_API_TOKEN` | unset | video provider credential |
+| `REPLICATE_VIDEO_MODEL` | empty | pinned `owner/model:version`; empty = refused |
+| `CREATIVE_PRICING_JSON` | `{}` | e.g. `{"image": 0.04, "video": 0.30}` — the contracted price, never a guess |
+| `CREATIVE_CAMPAIGN_BUDGET_USD` | `0.0` | zero blocks every billable generation |
+| `CREATIVE_ALLOW_PAID_GENERATION` | `false` | the authorisation switch |
+| `CREATIVE_PROVIDER_CACHE_DIR` | `/tmp/crusor-creative` | between submit and retrieve |
+
+### Test-only
+
+| Variable | Purpose |
+| --- | --- |
+| `CRUSOR_TEST_DATABASE_URL` | run the suite against PostgreSQL (CI sets it) |
+| `REDIS_URL` / `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` | broker round-trip in CI |

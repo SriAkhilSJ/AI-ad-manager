@@ -753,7 +753,8 @@ async def test_ads_execution_is_blocked_by_an_unavailable_transport_without_cons
     )
     assert op.outcome == "refused"
     assert "ads transport unavailable" in op.detail
-    assert "not implemented" in op.detail
+    # Phase 4.2 implemented the transports; what is missing now is the credential.
+    assert "META_ADS_ACCESS_TOKEN" in op.detail
 
     from app.models.ads import AdBudgetAuthorization
 
@@ -894,13 +895,17 @@ async def test_oauth_callback_rejects_an_unsigned_state(client, auth, brand):
     assert "not valid" in resp.json()["error"]["message"]
 
 
-async def test_ads_transports_report_unavailable(client, auth):
+async def test_ads_transports_report_implemented_but_unconfigured(client, auth):
+    """The transports exist (Phase 4.2); the credentials do not, and it says so."""
     resp = await client.get("/api/v1/ads/transports", headers=auth("viewer"))
     assert resp.status_code == 200
     rows = resp.json()
     assert {r["platform"] for r in rows} == {"meta_ads", "google_ads", "linkedin_ads"}
-    assert all(r["available"] is False and r["implemented"] is False for r in rows)
-    assert all("not implemented" in r["reason"] for r in rows)
+    assert all(r["implemented"] is True for r in rows)
+    assert all(r["available"] is False for r in rows)
+    assert all(r["verification"] == "unverified" for r in rows)
+    assert all(r["reason"] for r in rows)
+    assert all("unverified" in r["reason"] or "needs" in r["reason"] for r in rows)
 
 
 async def test_ads_proposal_cannot_be_authorised_by_a_marketer(client, auth, brand):

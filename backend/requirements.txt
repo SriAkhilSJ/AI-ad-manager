@@ -22,5 +22,6 @@ boto3==1.35.90
 # dev / test
 pytest==8.3.4
 pytest-asyncio==0.25.0
+pytest-xdist==3.6.1
 anyio==4.7.0
 email-validator==2.2.0

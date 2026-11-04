@@ -15,6 +15,8 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
+from app.db.types import GUID
+
 revision: str = "9b4c7d1e5a02"
 down_revision: Union[str, None] = "7c1f9a2d4e83"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -24,7 +26,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.create_table(
         "creative_briefs",
-        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -37,12 +39,12 @@ def upgrade() -> None:
             server_default=sa.text('(CURRENT_TIMESTAMP)'),
             nullable=False,
         ),
-        sa.Column("brand_profile_id", sa.String(length=36), nullable=False),
-        sa.Column("campaign_id", sa.String(length=36), nullable=True),
-        sa.Column("content_item_id", sa.String(length=36), nullable=True),
-        sa.Column("content_version_id", sa.String(length=36), nullable=True),
+        sa.Column("brand_profile_id", GUID(), nullable=False),
+        sa.Column("campaign_id", GUID(), nullable=True),
+        sa.Column("content_item_id", GUID(), nullable=True),
+        sa.Column("content_version_id", GUID(), nullable=True),
         sa.Column("content_hash", sa.String(length=64), nullable=False, server_default=""),
-        sa.Column("strategy_version_id", sa.String(length=36), nullable=True),
+        sa.Column("strategy_version_id", GUID(), nullable=True),
         sa.Column("version_number", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("brief_hash", sa.String(length=64), nullable=False, server_default=""),
         sa.Column("platform", sa.String(length=32), nullable=False, server_default=""),
@@ -66,7 +68,7 @@ def upgrade() -> None:
         sa.Column("validation_constraints", sa.JSON(), nullable=False),
         sa.Column("generation_mode", sa.String(length=32), nullable=False, server_default="deterministic"),
         sa.Column("created_by_agent", sa.String(length=64), nullable=True),
-        sa.Column("created_by", sa.String(length=36), nullable=True),
+        sa.Column("created_by", GUID(), nullable=True),
         sa.Column("generation_metadata", sa.JSON(), nullable=False),
         sa.ForeignKeyConstraint(["brand_profile_id"], ["brand_profiles.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["campaign_id"], ["campaigns.id"], ondelete="SET NULL"),
@@ -95,7 +97,7 @@ def upgrade() -> None:
 
     op.create_table(
         "creative_generation_jobs",
-        sa.Column("id", sa.String(length=36), primary_key=True),
+        sa.Column("id", GUID(), primary_key=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -108,12 +110,12 @@ def upgrade() -> None:
             server_default=sa.text('(CURRENT_TIMESTAMP)'),
             nullable=False,
         ),
-        sa.Column("brief_id", sa.String(length=36), nullable=False),
+        sa.Column("brief_id", GUID(), nullable=False),
         sa.Column("brief_version", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("brand_profile_id", sa.String(length=36), nullable=True),
-        sa.Column("campaign_id", sa.String(length=36), nullable=True),
-        sa.Column("content_item_id", sa.String(length=36), nullable=True),
-        sa.Column("content_version_id", sa.String(length=36), nullable=True),
+        sa.Column("brand_profile_id", GUID(), nullable=True),
+        sa.Column("campaign_id", GUID(), nullable=True),
+        sa.Column("content_item_id", GUID(), nullable=True),
+        sa.Column("content_version_id", GUID(), nullable=True),
         sa.Column("job_type", sa.String(length=16), nullable=False, server_default="image"),
         sa.Column("provider", sa.String(length=64), nullable=False, server_default="mock"),
         sa.Column("status", sa.String(length=24), nullable=False, server_default="queued"),
@@ -133,11 +135,11 @@ def upgrade() -> None:
         sa.Column("cost_estimate_usd", sa.Float(), nullable=True),
         sa.Column("cost_actual_usd", sa.Float(), nullable=True),
         sa.Column("price_verified", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("asset_id", sa.String(length=36), nullable=True),
+        sa.Column("asset_id", GUID(), nullable=True),
         sa.Column("idempotency_key", sa.String(length=255), nullable=True),
         sa.Column("request_hash", sa.String(length=64), nullable=False, server_default=""),
         sa.Column("audit_trail", sa.JSON(), nullable=False),
-        sa.Column("created_by", sa.String(length=36), nullable=True),
+        sa.Column("created_by", GUID(), nullable=True),
         sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
@@ -173,15 +175,15 @@ def upgrade() -> None:
     op.create_index("ix_creative_jobs_created", "creative_generation_jobs", ["created_at"])
 
     with op.batch_alter_table("creative_assets") as batch:
-        batch.add_column(sa.Column("brand_profile_id", sa.String(length=36), nullable=True))
-        batch.add_column(sa.Column("campaign_id", sa.String(length=36), nullable=True))
-        batch.add_column(sa.Column("brief_id", sa.String(length=36), nullable=True))
+        batch.add_column(sa.Column("brand_profile_id", GUID(), nullable=True))
+        batch.add_column(sa.Column("campaign_id", GUID(), nullable=True))
+        batch.add_column(sa.Column("brief_id", GUID(), nullable=True))
         batch.add_column(sa.Column("brief_version", sa.Integer(), nullable=False, server_default="0"))
-        batch.add_column(sa.Column("generation_job_id", sa.String(length=36), nullable=True))
+        batch.add_column(sa.Column("generation_job_id", GUID(), nullable=True))
         batch.add_column(sa.Column("asset_version", sa.Integer(), nullable=False, server_default="1"))
         batch.add_column(sa.Column("selected", sa.Boolean(), nullable=False, server_default=sa.false()))
-        batch.add_column(sa.Column("supersedes_asset_id", sa.String(length=36), nullable=True))
-        batch.add_column(sa.Column("root_asset_id", sa.String(length=36), nullable=True))
+        batch.add_column(sa.Column("supersedes_asset_id", GUID(), nullable=True))
+        batch.add_column(sa.Column("root_asset_id", GUID(), nullable=True))
         batch.add_column(sa.Column("duration_seconds", sa.Float(), nullable=True))
         batch.add_column(sa.Column("aspect_ratio", sa.String(length=16), nullable=False, server_default=""))
         batch.add_column(sa.Column("is_mock", sa.Boolean(), nullable=False, server_default=sa.false()))
@@ -222,9 +224,9 @@ def upgrade() -> None:
     op.create_index("ix_creative_assets_root_asset_id", "creative_assets", ["root_asset_id"])
 
     with op.batch_alter_table("approval_records") as batch:
-        batch.add_column(sa.Column("creative_brief_id", sa.String(length=36), nullable=True))
+        batch.add_column(sa.Column("creative_brief_id", GUID(), nullable=True))
         batch.add_column(sa.Column("creative_brief_version", sa.Integer(), nullable=True))
-        batch.add_column(sa.Column("creative_asset_id", sa.String(length=36), nullable=True))
+        batch.add_column(sa.Column("creative_asset_id", GUID(), nullable=True))
         batch.add_column(sa.Column("creative_asset_version", sa.Integer(), nullable=True))
         batch.add_column(
             sa.Column("creative_binding_hash", sa.String(length=64), nullable=False, server_default="")

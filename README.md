@@ -32,7 +32,7 @@ its exact proposal hash.
 | **Paid-media transports (Meta Graph v21.0 / Google Ads REST v17 / LinkedIn 202405)** | implemented with preview + dry-run + read-back; mock-tested, **never live-verified** |
 | **Creative providers (OpenAI Images, Replicate video)** | implemented behind price/budget/authorisation gates; mock-tested, **never live-verified** |
 | Google Flow / DeepX bridge | implemented behind provenance gates; **blocked** (source, release and installed artifact unverifiable) |
-| **PostgreSQL 16 + pgvector + Redis + Celery** | verified locally (migrations, full suite, broker round-trip) and in CI: the `backend-postgres` job runs the same suite then dispatches three real tasks through Redis |
+| **PostgreSQL 16 + pgvector + Redis + Celery** | verified locally (migrations, full suite, broker round-trip) and in CI: run 41870446667, `backend-postgres` job green — full suite on PostgreSQL, then three real tasks dispatched over Redis, all `SUCCESS` |
 | **Integration canaries** (`scripts/integration_canary.py`) | implemented and tested; **every provider blocked** — no credentials here, and this environment closes every provider TLS handshake |
 | **Lifecycle evidence** (`scripts/lifecycle_evidence.py`) | executed end-to-end against a live server: 25 trace entries, 26 checkpoints, approval boundary enforced |
 | Docker, compose | written and reviewed; **not executed** — Docker is unavailable in the authoring environment |
@@ -55,7 +55,7 @@ LIVE FLOW GENERATION:    DISABLED
 U1–U7:                   UNRESOLVED
 PHASE 3C.3:              NO-GO — NOT STARTED
 DOCKER COMPOSE:          NOT EXECUTED (docker unavailable in the authoring sandbox)
-CI (PG + Redis + Celery): GREEN
+CI (PG + Redis + Celery): GREEN — run 41870446667
 DIRECTOR LIFECYCLE:      EXECUTED, GOVERNANCE CHECKS PASS
 PROVIDER CANARIES:       BLOCKED (no credentials, no provider egress)
 PRODUCTION READINESS:    NOT CLAIMED

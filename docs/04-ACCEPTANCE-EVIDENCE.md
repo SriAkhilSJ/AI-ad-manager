@@ -336,7 +336,7 @@ per-provider detail is generated in
 | Canary harness logic (16 tests) | `pytest tests/test_phase4_3_canary_harness.py` | 16 passed — redaction, spend gating, authorisation parsing, no-live-by-default, evidence cannot self-upgrade |
 | Canary run, report + reachability + read-only live | `scripts/integration_canary.py --network --live --write` | 11 providers: all `blocked`; every reachability probe returns `ConnectError: TLS/SSL connection has been closed (EOF)` |
 | Director lifecycle against a live server | `scripts/lifecycle_evidence.py --base-url http://127.0.0.1:8000 --write` | 7/7 governance checks pass; 25 trace entries; 26 checkpoints; final state `completed`/`handed_off`; evidence in `lifecycle-run.json` |
-| Broker round trip in GitHub Actions | `backend-postgres` job, `redis:7-alpine` service | see §"CI" below |
+| Broker round trip in GitHub Actions | `backend-postgres` job, `redis:7-alpine` service | **success** — run 41870446667 on `4eb1e28`, all four jobs green; three tasks dispatched over Redis returned `SUCCESS` |
 
 ### The CI dependency defect (diagnosed from a real log, not guessed)
 

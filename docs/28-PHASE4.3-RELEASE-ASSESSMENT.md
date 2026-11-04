@@ -41,9 +41,41 @@ alone could not fix it — kombu had to be pinned too.
 | `scripts/celery_roundtrip.py` | probes the broker first, prints the trio, and redacts broker URLs |
 | diagnostics commit comment on failure | Actions logs are unreachable from here; the job now publishes its own evidence |
 
-The PostgreSQL 16 + pgvector + Redis + Celery round-trip is proven by the
-`backend-postgres` job: the full 1274-test suite on the production dialect, then a
-worker, then three real tasks dispatched through Redis and returned `SUCCESS`.
+### The result, from GitHub Actions
+
+Run **41870446667** on commit `4eb1e28`, all four jobs green:
+
+| Job | Result |
+| --- | --- |
+| `backend` — tests, migrations, audit (SQLite) | success |
+| `backend-postgres` — PostgreSQL 16 + pgvector + Redis | **success**, 6m25s |
+| `frontend` — typecheck, build | success |
+| `guard` — no credentials in source | success |
+
+Step by step in `backend-postgres`: Setup → `pip check` + resolved versions →
+Wait for PostgreSQL → Alembic upgrade/downgrade/upgrade → **full suite on
+PostgreSQL** → Wait for Redis → **start a Celery worker** → **broker round trip
+(dispatch → worker → result)** → stop the worker. The round trip is three real
+tasks (`crusor.run_job` ×2, `crusor.health_check`) dispatched over Redis and
+returned `SUCCESS` — the evidence Phase 4.2 could not produce.
+
+Two defects were found by making that job honest, and both are real:
+
+1. **kombu/redis-py incompatibility** (above) — the worker could not even start.
+2. **Celery tasks closed the event loop between tasks.** `app/tasks/jobs.py`
+   called `asyncio.run()` per task while the SQLAlchemy engine is a
+   process-wide singleton with a real async pool. The second task then checked
+   out a connection created on a closed loop:
+
+   ```text
+   FAIL refresh_analytics: RuntimeError: Task ... got Future ...
+     attached to a different loop
+   ERROR ... asyncpg ... raise RuntimeError('Event loop is closed')
+   ```
+
+   The first task always passed, so a one-task smoke test would never have caught
+   it, and SQLite tolerates the cross-loop reuse. `_run()` now keeps one loop per
+   worker process; the round trip passes on PostgreSQL.
 
 ---
 
@@ -281,7 +313,7 @@ added or sharpened:
 ## 9. Release recommendation
 
 ```text
-CI (PostgreSQL 16 + pgvector + Redis + Celery round-trip):  GREEN
+CI (PostgreSQL 16 + pgvector + Redis + Celery round-trip):  GREEN — run 41870446667
 DIRECTOR LIFECYCLE:      EXECUTED END-TO-END, GOVERNANCE CHECKS PASS
 CREATIVE PROVIDERS:      BLOCKED — no credentials, no egress
 SOCIAL OAUTH:            BLOCKED — no credentials, no vault, no egress

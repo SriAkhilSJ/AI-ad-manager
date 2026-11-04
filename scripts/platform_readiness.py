@@ -107,10 +107,56 @@ def _present(name: str) -> bool:
     return bool(_env_var(name).strip())
 
 
+def _preflight() -> dict:
+    """Measured reachability from docs/preflight.json, if a preflight has been run."""
+    import json
+
+    path = ROOT / "docs" / "preflight.json"
+    if not path.is_file():
+        return {"available": False, "providers": {}}
+    try:
+        data = json.loads(path.read_text("utf-8"))
+    except ValueError:
+        return {"available": False, "providers": {}}
+    providers = {
+        row["provider"]: {
+            "reachable": bool(row.get("reachable")),
+            "detail": next(
+                (
+                    f"{h['host']}: {h.get('tls_error') or h.get('tcp_error') or h.get('dns_error')}"
+                    for h in row.get("hosts", [])
+                    if not h.get("reachable")
+                ),
+                "all hosts reachable over verified TLS",
+            ),
+        }
+        for row in data.get("providers", [])
+    }
+    return {
+        "available": True,
+        "generated_at": data.get("generated_at"),
+        "providers": providers,
+    }
+
+
 def build_report() -> dict:
     from app.core.config import Settings
     from app.integrations.ads import ads_transport_report
     from app.integrations.platforms import CAPABILITIES
+
+    preflight = _preflight()
+
+    #: preflight measures hosts, not products: Instagram rides on the Meta app.
+    preflight_alias = {"instagram": "facebook"}
+
+    def reach(provider: str) -> tuple[str, str]:
+        """(reachable?, detail) from the measured preflight, not an assumption."""
+        if not preflight["available"]:
+            return "not measured", "run scripts/environment_preflight.py --write"
+        row = preflight["providers"].get(preflight_alias.get(provider, provider))
+        if row is None:
+            return "not measured", "provider missing from the preflight report"
+        return ("yes" if row["reachable"] else "no"), row["detail"]
 
     settings = Settings()
     publish_enabled = bool(getattr(settings, "publishing_enabled", False))
@@ -132,6 +178,9 @@ def build_report() -> dict:
                 "not_implemented": unusable,
                 "mock_tested": "yes (httpx.MockTransport suites)",
                 "credential_configured": "no" if missing else "yes",
+                "network_reachable": reach(platform)[0],
+                "network_detail": reach(platform)[1],
+                "authenticated": "no",
                 "sandbox_verified": "no",
                 "production_verified": "no",
                 "blockers": [
@@ -157,6 +206,9 @@ def build_report() -> dict:
                 "configured": "yes" if row["available"] else "no",
                 "mock_tested": "yes (httpx.MockTransport suites)",
                 "credential_configured": "no" if missing else "yes",
+                "network_reachable": reach(row["platform"])[0],
+                "network_detail": reach(row["platform"])[1],
+                "authenticated": "no",
                 "sandbox_verified": "no",
                 "production_verified": "no",
                 "missing": missing,
@@ -182,6 +234,13 @@ def build_report() -> dict:
                 "implemented": "yes",
                 "mock_tested": "yes (httpx.MockTransport suites)",
                 "credential_configured": "no" if missing else "yes",
+                "network_reachable": reach(
+                    "openai" if name == "openai_image" else "replicate"
+                )[0],
+                "network_detail": reach(
+                    "openai" if name == "openai_image" else "replicate"
+                )[1],
+                "authenticated": "no",
                 "sandbox_verified": "no",
                 "production_verified": "no",
                 "blocked": (
@@ -213,6 +272,7 @@ def build_report() -> dict:
         "ads": ads,
         "creative": creative,
         "creative_rows": creative_rows,
+        "preflight": preflight,
         "flow": "disabled — source, signed release and installed artifact remain unverifiable",
     }
 
@@ -227,13 +287,28 @@ def render_markdown(report: dict) -> str:
     add("")
     add("**How to read the columns.** `implemented` is what the code does. "
         "`mock-tested` means an automated suite exercises it against "
-        "`httpx.MockTransport`. `credential-configured` is only about presence: the "
+        "`httpx.MockTransport`. `network reachable` is **measured**, not assumed: it "
+        "comes from `docs/preflight.json` (DNS → TCP → verified TLS → HTTPS from the "
+        "deployment host). `credentials` is only about presence. `authenticated` means "
+        "a provider accepted those credentials in a real call. `credential-configured` "
+        "is only about presence: the "
         "environment variables exist *and* the OAuth prerequisites below are met; it "
         "is not evidence that a provider accepted them. `sandbox-verified` and "
         "`production-verified` can only be filled by a real call against a real "
         "developer account, so both are `no` for every row until one is recorded in "
         "`docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because "
         "its code exists.")
+    add("")
+    add("## Network")
+    add("")
+    if report.get("preflight", {}).get("available"):
+        add(f"Measured by `scripts/environment_preflight.py` at {report['preflight'].get('generated_at')}.")
+        add("")
+        for row in [*report["platforms"], *report["ads"], *report["creative_rows"]]:
+            if row.get("network_reachable") == "no":
+                add(f"- **{row['label']}**: {row.get('network_detail', '')}")
+    else:
+        add("Not measured yet — run `python ../scripts/environment_preflight.py --write`.")
     add("")
     add("## OAuth prerequisites")
     add("")
@@ -248,33 +323,36 @@ def render_markdown(report: dict) -> str:
     add("")
     add("## Six platforms")
     add("")
-    add("| Platform | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified |")
-    add("| --- | --- | --- | --- | --- | --- |")
+    add("| Platform | Implemented | Mock-tested | Credentials | Network reachable | Authenticated | Sandbox-verified | Production-verified |")
+    add("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for row in report["platforms"]:
         add(
             f"| {row['label']} | {row['implemented']} | {row['mock_tested']} | "
-            f"{row['credential_configured']} | {row['sandbox_verified']} | {row['production_verified']} |"
+            f"{row['credential_configured']} | {row['network_reachable']} | "
+            f"{row['authenticated']} | {row['sandbox_verified']} | {row['production_verified']} |"
         )
     add("")
     add("## Paid media")
     add("")
-    add("| Platform | API | Implemented | Credential-configured | Sandbox-verified | Production-verified |")
-    add("| --- | --- | --- | --- | --- | --- |")
+    add("| Platform | API | Implemented | Credentials | Network reachable | Authenticated | Sandbox-verified | Production-verified |")
+    add("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for row in report["ads"]:
         add(
             f"| {row['label']} | {row['api_version']} | {row['implemented']} | "
-            f"{row['credential_configured']} | {row['sandbox_verified']} | "
+            f"{row['credential_configured']} | {row['network_reachable']} | "
+            f"{row['authenticated']} | {row['sandbox_verified']} | "
             f"{row['production_verified']} |"
         )
     add("")
     add("## Creative generation")
     add("")
-    add("| Provider | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified | Blocked by |")
-    add("| --- | --- | --- | --- | --- | --- | --- |")
+    add("| Provider | Implemented | Mock-tested | Credentials | Network reachable | Authenticated | Sandbox-verified | Production-verified | Blocked by |")
+    add("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for row in report["creative_rows"]:
         add(
             f"| {row['label']} | {row['implemented']} | {row['mock_tested']} | "
-            f"{row['credential_configured']} | {row['sandbox_verified']} | "
+            f"{row['credential_configured']} | {row['network_reachable']} | "
+            f"{row['authenticated']} | {row['sandbox_verified']} | "
             f"{row['production_verified']} | {row['blocked']} |"
         )
     add("")

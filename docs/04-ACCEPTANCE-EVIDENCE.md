@@ -369,3 +369,61 @@ the worker never reports ready, and a unique worker node name.
 * **Any ad creation or spend.** No campaign was created; the ad transports refuse
   without their own credentials.
 * **Flow.** Still disabled; provenance remains unverified.
+
+---
+
+## Phase 4.4 evidence — founder provisioning (2026-11-04 UTC)
+
+Phase 4.4 was operational: provision real credentials and activate external
+integrations. It stopped at two external blockers. The narrative, the founder
+runbook and the full credential matrix are in
+[`29-PHASE4.4-PROVISIONING-REPORT.md`](29-PHASE4.4-PROVISIONING-REPORT.md);
+the raw preflight output is `preflight.json` and the regenerated matrix is
+`25-platform-readiness.md`.
+
+### Executed
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Per-provider egress preflight | `scripts/environment_preflight.py --write` | DNS ok and TCP 443 ok for all **10** providers; **verified TLS fails for all 10** with `SSLZeroReturnError: TLS/SSL connection has been closed (EOF)`; exit 2 |
+| Allowlist diagnosis | manual probe of `github.com`, `pypi.org`, `registry.npmjs.org`, `example.com`, `api.anthropic.com` | allowlisted hosts complete TLS (GitHub certificate is re-signed by a sandbox CA); non-allowlisted hosts are closed before any certificate is offered → **selective egress policy, not a trust-store defect** |
+| Proxy / CA inspection | same run | `HTTP(S)_PROXY`, `ALL_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE` all unset; system trust store; clock correct |
+| Credential presence and shape | `scripts/provision_credentials.py check` | every tier `MISSING` (core, vault, oauth_redirect, llm, creative_image, creative_video, publishing, 6 social, 3 ads); exit 2 |
+| Vault key generation | `scripts/provision_credentials.py keygen --out /tmp/…` | 64-hex key in a `0600` file, value never printed, existing file refused, repo paths refused; test file deleted |
+| Provisioning refusal paths (16 tests) | `pytest tests/test_phase4_4_provisioning.py` | **16 passed** — no values leak, DNS-failure structure, policy-block vs certificate classification, static guard that `CERT_NONE`/`check_hostname=False` never appear, keygen modes, every shape validator, empty vs complete env |
+| Full backend suite, SQLite | `pytest tests` | **1308 passed**, 0 failures (603.5 s) |
+| Director lifecycle, live server | `scripts/lifecycle_evidence.py --base-url http://127.0.0.1:8000 --write` | 7/7 governance checks pass; 25 trace entries; 26 checkpoints; runtime recorded as `real_providers_in_use: false`, `creative_provider: mock`, `publishing: unavailable` |
+
+### The egress finding, stated precisely
+
+`SSLZeroReturnError` on connect *after* a successful TCP handshake, in 20–100 ms,
+with no certificate presented, distinguishes a policy refusal from a certificate
+error. Combined with allowlisted hosts succeeding and showing a sandbox-issued
+certificate, the mechanism is an egress allowlist. TLS verification was **not**
+relaxed anywhere to work around it — a static test asserts that no `CERT_NONE`,
+`check_hostname=False` or `verify=False` exists in the provisioning path.
+
+### Updated matrix
+
+`25-platform-readiness.md` now carries the Phase 4.4 columns — implemented,
+mock-tested, credentials, **network reachable** (measured, from `preflight.json`),
+authenticated, sandbox-verified, production-verified — plus a Network section that
+names each blocked host and its error.
+
+### Not executed, and therefore not claimed
+
+* **Any provider activation.** No credential exists and no provider is reachable.
+
+* **Any real generation.** The creative canary never submitted a job; the mock
+  provider produced the artifacts used for association tests. Nothing was spent.
+
+* **Any real publish.** No OAuth app, no account, no post. Founder approval before
+  publishing remains enforced and untested against a live platform.
+
+* **Any analytics.** `available: false` with the reason "token vault is disabled
+  (`TOKEN_VAULT_BACKEND=none`)" — no zeros, no estimates.
+
+* **Any ads account validation.** Read-only validation is wired but was never
+  pointed at an account; no campaign created, $0.00 spent.
+
+* **Flow.** Still disabled pending source and provenance.

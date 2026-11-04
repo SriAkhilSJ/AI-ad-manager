@@ -1,0 +1,469 @@
+{
+  "generated_at": "2026-11-04T18:08:03+00:00",
+  "python": "3.11.2",
+  "openssl": "OpenSSL 3.0.20 7 Apr 2026",
+  "clock_utc": "2026-11-04T18:08:03+00:00",
+  "proxy_env": {
+    "HTTP_PROXY": "unset",
+    "HTTPS_PROXY": "unset",
+    "ALL_PROXY": "unset",
+    "NO_PROXY": "unset",
+    "http_proxy": "unset",
+    "https_proxy": "unset",
+    "no_proxy": "unset"
+  },
+  "ca_env": {
+    "SSL_CERT_FILE": "unset",
+    "SSL_CERT_DIR": "unset",
+    "REQUESTS_CA_BUNDLE": "unset",
+    "CURL_CA_BUNDLE": "unset"
+  },
+  "core_env": {
+    "SECRET_KEY": "unset",
+    "DATABASE_URL": "unset",
+    "TOKEN_VAULT_BACKEND": "unset",
+    "TOKEN_VAULT_KEY": "unset",
+    "OAUTH_REDIRECT_BASE_URL": "unset",
+    "PUBLISHING_ENABLED": "unset",
+    "CREATIVE_ALLOW_PAID_GENERATION": "unset",
+    "CREATIVE_CAMPAIGN_BUDGET_USD": "unset",
+    "CREATIVE_PRICING_JSON": "unset",
+    "LLM_PROVIDER": "unset",
+    "FLOW_LIVE_GENERATION_ENABLED": "unset"
+  },
+  "providers": [
+    {
+      "provider": "openai",
+      "label": "OpenAI (images / LLM)",
+      "kind": "creative",
+      "hosts": [
+        {
+          "host": "api.openai.com",
+          "dns": "ok",
+          "addresses": [
+            "162.159.140.245",
+            "172.66.0.243",
+            "2606:4700:7::f3",
+            "2a06:98c1:58::f3"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 28.2,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "OPENAI_API_KEY": "unset",
+        "OPENAI_IMAGE_MODEL": "set"
+      },
+      "configured": false
+    },
+    {
+      "provider": "replicate",
+      "label": "Replicate (async video)",
+      "kind": "creative",
+      "hosts": [
+        {
+          "host": "api.replicate.com",
+          "dns": "ok",
+          "addresses": [
+            "104.18.2.60",
+            "104.18.3.60",
+            "2606:4700::6812:23c",
+            "2606:4700::6812:33c"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 32.2,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "REPLICATE_API_TOKEN": "unset",
+        "REPLICATE_VIDEO_MODEL": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "facebook",
+      "label": "Meta Graph (Facebook / Instagram)",
+      "kind": "social",
+      "hosts": [
+        {
+          "host": "graph.facebook.com",
+          "dns": "ok",
+          "addresses": [
+            "2a03:2880:f36c:8d:face:b00c:0:2",
+            "57.144.216.141"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 69.9,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        },
+        {
+          "host": "www.facebook.com",
+          "dns": "ok",
+          "addresses": [
+            "2a03:2880:f36c:1:face:b00c:0:25de",
+            "57.144.216.1"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 22.5,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "META_APP_ID": "unset",
+        "META_APP_SECRET": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "linkedin",
+      "label": "LinkedIn",
+      "kind": "social",
+      "hosts": [
+        {
+          "host": "api.linkedin.com",
+          "dns": "ok",
+          "addresses": [
+            "104.18.41.41",
+            "172.64.146.215",
+            "2a06:98c1:3109::6812:2929",
+            "2a06:98c1:310b::ac40:92d7"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 27.1,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        },
+        {
+          "host": "www.linkedin.com",
+          "dns": "ok",
+          "addresses": [
+            "104.18.41.41",
+            "172.64.146.215",
+            "2a06:98c1:3109::6812:2929",
+            "2a06:98c1:310b::ac40:92d7"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 59.7,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "LINKEDIN_CLIENT_ID": "unset",
+        "LINKEDIN_CLIENT_SECRET": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "x",
+      "label": "X",
+      "kind": "social",
+      "hosts": [
+        {
+          "host": "api.twitter.com",
+          "dns": "ok",
+          "addresses": [
+            "162.159.140.229",
+            "172.66.0.227"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 26.0,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        },
+        {
+          "host": "twitter.com",
+          "dns": "ok",
+          "addresses": [
+            "172.66.0.227"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 24.5,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "X_CLIENT_ID": "unset",
+        "X_CLIENT_SECRET": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "youtube",
+      "label": "Google / YouTube",
+      "kind": "social",
+      "hosts": [
+        {
+          "host": "oauth2.googleapis.com",
+          "dns": "ok",
+          "addresses": [
+            "2607:f8b0:400e:c17::5f",
+            "74.125.135.95"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 24.0,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        },
+        {
+          "host": "www.googleapis.com",
+          "dns": "ok",
+          "addresses": [
+            "172.217.112.4",
+            "172.217.113.4",
+            "172.217.114.4",
+            "172.217.115.4",
+            "172.217.116.4",
+            "172.217.117.4",
+            "172.217.118.4",
+            "172.217.119.4",
+            "2001:4860:4840:400::",
+            "2001:4860:4841:400::",
+            "2001:4860:4842:400::",
+            "2001:4860:4843:400::",
+            "2001:4860:4844:400::",
+            "2001:4860:4845:400::",
+            "2001:4860:4846:400::",
+            "2001:4860:4847:400::"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 27.7,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "GOOGLE_CLIENT_ID": "unset",
+        "GOOGLE_CLIENT_SECRET": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "reddit",
+      "label": "Reddit",
+      "kind": "social",
+      "hosts": [
+        {
+          "host": "oauth.reddit.com",
+          "dns": "ok",
+          "addresses": [
+            "151.101.1.140",
+            "151.101.129.140",
+            "151.101.193.140",
+            "151.101.65.140"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 43.2,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        },
+        {
+          "host": "www.reddit.com",
+          "dns": "ok",
+          "addresses": [
+            "151.101.1.140",
+            "151.101.129.140",
+            "151.101.193.140",
+            "151.101.65.140"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 46.6,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "REDDIT_CLIENT_ID": "unset",
+        "REDDIT_CLIENT_SECRET": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "meta_ads",
+      "label": "Meta Marketing API",
+      "kind": "ads",
+      "hosts": [
+        {
+          "host": "graph.facebook.com",
+          "dns": "ok",
+          "addresses": [
+            "2a03:2880:f36c:8d:face:b00c:0:2",
+            "57.144.216.141"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 47.8,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "META_ADS_ACCESS_TOKEN": "unset",
+        "META_ADS_ACCOUNT_ID": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "google_ads",
+      "label": "Google Ads API",
+      "kind": "ads",
+      "hosts": [
+        {
+          "host": "googleads.googleapis.com",
+          "dns": "ok",
+          "addresses": [
+            "172.217.112.4",
+            "172.217.113.4",
+            "172.217.114.4",
+            "172.217.115.4",
+            "172.217.116.4",
+            "172.217.117.4",
+            "172.217.118.4",
+            "172.217.119.4",
+            "2001:4860:4840:400::",
+            "2001:4860:4841:400::",
+            "2001:4860:4842:400::",
+            "2001:4860:4843:400::",
+            "2001:4860:4844:400::",
+            "2001:4860:4845:400::",
+            "2001:4860:4846:400::",
+            "2001:4860:4847:400::"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 38.9,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        },
+        {
+          "host": "oauth2.googleapis.com",
+          "dns": "ok",
+          "addresses": [
+            "2607:f8b0:400e:c0d::5f",
+            "74.125.135.95"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 23.4,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "GOOGLE_ADS_ACCESS_TOKEN": "unset",
+        "GOOGLE_ADS_DEVELOPER_TOKEN": "unset",
+        "GOOGLE_ADS_LOGIN_CUSTOMER_ID": "unset"
+      },
+      "configured": false
+    },
+    {
+      "provider": "linkedin_ads",
+      "label": "LinkedIn Marketing API",
+      "kind": "ads",
+      "hosts": [
+        {
+          "host": "api.linkedin.com",
+          "dns": "ok",
+          "addresses": [
+            "104.18.41.41",
+            "172.64.146.215",
+            "2a06:98c1:3109::6812:2929",
+            "2a06:98c1:310b::ac40:92d7"
+          ],
+          "tcp": "ok",
+          "tls": "fail",
+          "tls_verified": false,
+          "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
+          "https": "skipped",
+          "reachable": false,
+          "ms": 55.1,
+          "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
+        }
+      ],
+      "reachable": false,
+      "env": {
+        "LINKEDIN_ADS_ACCESS_TOKEN": "unset",
+        "LINKEDIN_ADS_ACCOUNT_URN": "unset"
+      },
+      "configured": false
+    }
+  ],
+  "summary": {
+    "providers_checked": 10,
+    "reachable": 0,
+    "blocked": 10
+  }
+}

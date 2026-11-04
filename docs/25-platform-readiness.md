@@ -1,8 +1,24 @@
 # 25 — Platform readiness and founder checklist
 
-Generated 2026-11-04T15:45:59+00:00 from code + the current environment (`ENVIRONMENT=development`).
+Generated 2026-11-04T18:08:21+00:00 from code + the current environment (`ENVIRONMENT=development`).
 
-**How to read the columns.** `implemented` is what the code does. `mock-tested` means an automated suite exercises it against `httpx.MockTransport`. `credential-configured` is only about presence: the environment variables exist *and* the OAuth prerequisites below are met; it is not evidence that a provider accepted them. `sandbox-verified` and `production-verified` can only be filled by a real call against a real developer account, so both are `no` for every row until one is recorded in `docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because its code exists.
+**How to read the columns.** `implemented` is what the code does. `mock-tested` means an automated suite exercises it against `httpx.MockTransport`. `network reachable` is **measured**, not assumed: it comes from `docs/preflight.json` (DNS → TCP → verified TLS → HTTPS from the deployment host). `credentials` is only about presence. `authenticated` means a provider accepted those credentials in a real call. `credential-configured` is only about presence: the environment variables exist *and* the OAuth prerequisites below are met; it is not evidence that a provider accepted them. `sandbox-verified` and `production-verified` can only be filled by a real call against a real developer account, so both are `no` for every row until one is recorded in `docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because its code exists.
+
+## Network
+
+Measured by `scripts/environment_preflight.py` at 2026-11-04T18:08:03+00:00.
+
+- **Facebook Page**: graph.facebook.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **Instagram Business**: graph.facebook.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **LinkedIn Page**: api.linkedin.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **X (Twitter)**: api.twitter.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **YouTube**: oauth2.googleapis.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **Reddit**: oauth.reddit.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **Meta Marketing API**: graph.facebook.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **Google Ads API**: googleads.googleapis.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **LinkedIn Ads API**: api.linkedin.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **OpenAI Images**: api.openai.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
+- **Replicate video**: api.replicate.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
 
 ## OAuth prerequisites
 
@@ -16,29 +32,29 @@ is not supported anywhere in this codebase.
 
 ## Six platforms
 
-| Platform | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified |
-| --- | --- | --- | --- | --- | --- |
-| Facebook Page | yes | yes (httpx.MockTransport suites) | no | no | no |
-| Instagram Business | yes | yes (httpx.MockTransport suites) | no | no | no |
-| LinkedIn Page | yes | yes (httpx.MockTransport suites) | no | no | no |
-| X (Twitter) | yes | yes (httpx.MockTransport suites) | no | no | no |
-| YouTube | yes | yes (httpx.MockTransport suites) | no | no | no |
-| Reddit | yes | yes (httpx.MockTransport suites) | no | no | no |
+| Platform | Implemented | Mock-tested | Credentials | Network reachable | Authenticated | Sandbox-verified | Production-verified |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Facebook Page | yes | yes (httpx.MockTransport suites) | no | no | no | no | no |
+| Instagram Business | yes | yes (httpx.MockTransport suites) | no | no | no | no | no |
+| LinkedIn Page | yes | yes (httpx.MockTransport suites) | no | no | no | no | no |
+| X (Twitter) | yes | yes (httpx.MockTransport suites) | no | no | no | no | no |
+| YouTube | yes | yes (httpx.MockTransport suites) | no | no | no | no | no |
+| Reddit | yes | yes (httpx.MockTransport suites) | no | no | no | no | no |
 
 ## Paid media
 
-| Platform | API | Implemented | Credential-configured | Sandbox-verified | Production-verified |
-| --- | --- | --- | --- | --- | --- |
-| Meta Marketing API | Graph v21.0 | yes | no | no | no |
-| Google Ads API | REST v17 | yes | no | no | no |
-| LinkedIn Ads API | 202405 | yes | no | no | no |
+| Platform | API | Implemented | Credentials | Network reachable | Authenticated | Sandbox-verified | Production-verified |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Meta Marketing API | Graph v21.0 | yes | no | no | no | no | no |
+| Google Ads API | REST v17 | yes | no | no | no | no | no |
+| LinkedIn Ads API | 202405 | yes | no | no | no | no | no |
 
 ## Creative generation
 
-| Provider | Implemented | Mock-tested | Credential-configured | Sandbox-verified | Production-verified | Blocked by |
-| --- | --- | --- | --- | --- | --- | --- |
-| OpenAI Images | yes | yes (httpx.MockTransport suites) | no | no | no | missing OPENAI_API_KEY, price not pinned in CREATIVE_PRICING_JSON, CREATIVE_CAMPAIGN_BUDGET_USD is 0, CREATIVE_ALLOW_PAID_GENERATION is not true |
-| Replicate video | yes | yes (httpx.MockTransport suites) | no | no | no | missing REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL, price not pinned in CREATIVE_PRICING_JSON, CREATIVE_CAMPAIGN_BUDGET_USD is 0, CREATIVE_ALLOW_PAID_GENERATION is not true |
+| Provider | Implemented | Mock-tested | Credentials | Network reachable | Authenticated | Sandbox-verified | Production-verified | Blocked by |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OpenAI Images | yes | yes (httpx.MockTransport suites) | no | no | no | no | no | missing OPENAI_API_KEY, price not pinned in CREATIVE_PRICING_JSON, CREATIVE_CAMPAIGN_BUDGET_USD is 0, CREATIVE_ALLOW_PAID_GENERATION is not true |
+| Replicate video | yes | yes (httpx.MockTransport suites) | no | no | no | no | no | missing REPLICATE_API_TOKEN, REPLICATE_VIDEO_MODEL, price not pinned in CREATIVE_PRICING_JSON, CREATIVE_CAMPAIGN_BUDGET_USD is 0, CREATIVE_ALLOW_PAID_GENERATION is not true |
 
 - Provider set: `mock`
 - State: `available` — Deterministic mock provider. No model or external service is called, and video requests produce a poster frame rather than an encoded video.

@@ -141,6 +141,31 @@ def main(argv: list[str] | None = None) -> int:
 
         status, system = api.call("GET", "/api/v1/system/status")
         step("system_status", status, system)
+        # Record what actually drove this run: a lifecycle executed with
+        # deterministic providers is not evidence about a real one.
+        llm = system.get("llm") or {}
+        evidence["runtime"] = {
+            "llm_status": llm.get("status"),
+            "llm_configured": (llm.get("routing") or {}).get("configured"),
+            "llm_providers_configured": {
+                name: bool((row or {}).get("configured") or (row or {}).get("credential_present"))
+                for name, row in (llm.get("providers") or {}).items()
+            },
+            "unverified_models": (llm.get("routing") or {}).get("unverified_models"),
+            "publishing": (system.get("publishing") or {}).get("status"),
+            "publishing_reason": (system.get("publishing") or {}).get("vault_reason"),
+            "creative_flow": ((system.get("creative") or {}).get("flow_connector") or {}).get("status"),
+            "creative_provider": (system.get("creative") or {}).get("provider"),
+            # The deterministic provider is not a provider: it must never make a
+            # run look like it used a real model.
+            "real_providers_in_use": bool(
+                any(
+                    bool((row or {}).get("configured") or (row or {}).get("credential_present"))
+                    for name, row in (llm.get("providers") or {}).items()
+                    if name.lower() not in {"mock", "deterministic", "none"}
+                )
+            ),
+        }
 
         status, brand = api.call("GET", "/api/v1/brand/active")
         step("brand", status, brand)
@@ -334,6 +359,12 @@ def main(argv: list[str] | None = None) -> int:
             for entry in checks:
                 mark = "PASS" if entry["ok"] else "FAIL"
                 print(f"  {mark}  {entry['check']}: {entry['detail']}")
+            runtime = evidence.get("runtime") or {}
+            print(
+                f"providers: real_llm={runtime.get('real_providers_in_use')} "
+                f"creative={runtime.get('creative_provider')} "
+                f"publishing={runtime.get('publishing')}"
+            )
             print(f"lifecycle: {summary.get('status')} at {summary.get('lifecycle_stage')}")
 
         if args.write:

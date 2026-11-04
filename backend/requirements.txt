@@ -16,7 +16,13 @@ structlog==24.4.0
 langgraph==0.2.62
 langchain-core==0.3.28
 celery==5.4.0
-redis==5.2.1
+# kombu (Celery's messaging layer) drives Redis through the redis-py client, and
+# its transport is only exercised against the 5.0 line. 5.2.x changed connection
+# internals the transport still relies on, which shows up as an instant
+# OperationalError the moment a worker inspects the broker — invisible in unit
+# tests, fatal in CI. Pinned to the version the transport is tested against;
+# raise it only together with a broker round-trip in CI.
+redis==5.0.8
 boto3==1.35.90
 
 # dev / test

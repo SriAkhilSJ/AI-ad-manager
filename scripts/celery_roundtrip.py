@@ -25,6 +25,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND))
@@ -40,11 +41,36 @@ EXPECTED = {
 }
 
 
+def redact(url: str | None) -> str:
+    """Never print a broker credential, even in a diagnostic dump."""
+    if not url:
+        return "<unset>"
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return "<unparseable>"
+    if parsed.password or parsed.username:
+        host = parsed.hostname or "?"
+        port = f":{parsed.port}" if parsed.port else ""
+        creds = "***@" if parsed.username or parsed.password else ""
+        return f"{parsed.scheme}://{creds}{host}{port}{parsed.path}"
+    return url
+
+
+def versions() -> str:
+    import celery
+    import kombu
+    import redis
+
+    return f"celery {celery.__version__}, kombu {kombu.__version__}, redis-py {redis.__version__}"
+
+
 def main() -> int:
     from app.core.config import get_settings
     from app.tasks.celery_app import celery_app
     from app.tasks.dispatcher import get_dispatcher
 
+    print(f"versions: {versions()}")
     settings = get_settings()
     dispatcher = get_dispatcher(settings)
     print(f"resolved dispatcher: {dispatcher.driver} (available={dispatcher.available})")
@@ -53,8 +79,20 @@ def main() -> int:
         return 4
 
     broker = celery_app.conf.broker_url
-    print(f"broker: {broker}")
-    print(f"backend: {celery_app.conf.result_backend}")
+    print(f"broker: {redact(broker)}")
+    print(f"backend: {redact(celery_app.conf.result_backend)}")
+
+    # Probe the broker directly first, so a refused connection is reported as a
+    # refused connection instead of surfacing later as an opaque task timeout.
+    try:
+        import redis as redis_lib
+
+        client = redis_lib.Redis.from_url(broker, socket_connect_timeout=5, socket_timeout=5)
+        client.ping()
+        print("broker probe: PING ok")
+    except Exception as exc:  # noqa: BLE001 - this is exactly what we diagnose
+        print(f"FAIL: the broker is not reachable: {type(exc).__name__}: {exc}")
+        return 5
 
     inspections = celery_app.control.inspect(timeout=10.0)
     try:

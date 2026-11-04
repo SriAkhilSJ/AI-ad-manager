@@ -82,6 +82,8 @@ jobs:
     # defect that SQLite masks (type mismatches, FK/CHAR widths, extension
     # requirements, cross-loop pooling) fails here instead of at launch.
     timeout-minutes: 45
+    permissions:
+      contents: write   # only so a failed run can post its own diagnostics
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -131,6 +133,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Dependency sanity (pip check + the broker stack)
+        working-directory: backend
+        # redis-py drove kombu's transport through an incompatible release before;
+        # `pip check` does not catch that (the metadata claims are satisfied), so
+        # the resolved versions are printed next to the real round-trip below.
+        run: |
+          pip check
+          python - <<'PY'
+          import celery, kombu, redis
+          print(f"celery {celery.__version__} | kombu {kombu.__version__} | redis-py {redis.__version__}")
+          PY
+
       - name: Wait for PostgreSQL
         working-directory: backend
         run: |
@@ -171,20 +185,69 @@ jobs:
         working-directory: backend
         run: pytest tests -q -n 4 -p no:randomly
 
+      - name: Wait for Redis
+        working-directory: backend
+        # The container health check is not proof the client library can talk to
+        # it; this is. It fails the job here rather than inside the round trip.
+        run: |
+          python - <<'PY'
+          import os, time, redis
+          url = os.environ["REDIS_URL"]
+          for attempt in range(30):
+              try:
+                  client = redis.Redis.from_url(url, socket_connect_timeout=5, socket_timeout=5)
+                  server = client.info("server")
+                  print(f"redis reachable via redis-py {redis.__version__}: "
+                        f"server {server.get('redis_version')} on {url}")
+                  break
+              except Exception as exc:
+                  if attempt == 29:
+                      raise
+                  print(f"waiting for redis: {type(exc).__name__}: {exc}")
+                  time.sleep(2)
+          PY
+
       - name: Start a Celery worker
         working-directory: backend
+        # A unique node name: two workers sharing `celery@hostname` make
+        # `inspect()` answer from whichever registers last, which is how a stale
+        # worker can make a correct dispatch look broken.
         run: |
           celery -A app.tasks.celery_app:celery_app worker --pool=solo --loglevel=info \
-            --detach --pidfile=/tmp/celery.pid --logfile=/tmp/celery.log
+            -n "crusor-ci@%h" --detach --pidfile=/tmp/celery.pid --logfile=/tmp/celery.log
           for i in $(seq 1 30); do
             grep -q "ready" /tmp/celery.log && break
             sleep 2
           done
           cat /tmp/celery.log
+          grep -q "ready" /tmp/celery.log || { echo "::error::the worker never reported ready"; exit 1; }
 
       - name: Broker round trip (dispatch → worker → result)
         working-directory: backend
         run: python ../scripts/celery_roundtrip.py
+
+      - name: Publish broker diagnostics on failure
+        if: failure()
+        working-directory: backend
+        # Actions logs are downloadable only from a storage host, so a failure in
+        # this job is otherwise invisible to anyone reading the run through the
+        # API. This posts the tails as a commit comment (no secrets: the script
+        # redacts broker URLs and the app redacts log fields).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "### CI broker job failed — diagnostics"
+            echo '```'
+            echo "celery/kombu/redis: $(python -c 'import celery,kombu,redis;print(celery.__version__,kombu.__version__,redis.__version__)' 2>&1)"
+            echo "--- worker log (tail) ---"
+            tail -60 /tmp/celery.log 2>&1 || true
+            echo '```'
+          } > /tmp/diag.md
+          gh api --method POST "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="$(cat /tmp/diag.md)" >/dev/null 2>&1 \
+            || echo "could not post diagnostics (no permission); see the job log"
+
 
       - name: Stop the Celery worker
         if: always()

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-04T15:39:43+00:00",
+  "generated_at": "2026-11-04T16:58:05+00:00",
   "base_url": "http://127.0.0.1:8000",
   "steps": [
     {
@@ -7,7 +7,7 @@
       "status": 200,
       "payload": {
         "status": "ok",
-        "uptime_seconds": 4510.8
+        "uptime_seconds": 9213.3
       }
     },
     {
@@ -26,7 +26,7 @@
           "environment": "development",
           "version": "1.1.0-phase2",
           "api_prefix": "/api/v1",
-          "uptime_seconds": 4511.1,
+          "uptime_seconds": 9213.6,
           "bootstrap_required": false
         },
         "database": {
@@ -1037,7 +1037,7 @@
         "strategy_id": null,
         "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
         "content_item_ids": [
-          "8b368d01-661d-4f26-aa30-03c527659d1d"
+          "ab8a417f-7ab7-4887-ad27-293ac1538e67"
         ],
         "schedule_plan": [],
         "schedule_blocked": [],
@@ -1357,7 +1357,7 @@
         "strategy_id": null,
         "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
         "content_item_ids": [
-          "8b368d01-661d-4f26-aa30-03c527659d1d"
+          "ab8a417f-7ab7-4887-ad27-293ac1538e67"
         ],
         "schedule_plan": [],
         "schedule_blocked": [],
@@ -1677,12 +1677,12 @@
         "strategy_id": null,
         "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
         "content_item_ids": [
-          "8b368d01-661d-4f26-aa30-03c527659d1d"
+          "ab8a417f-7ab7-4887-ad27-293ac1538e67"
         ],
         "schedule_plan": [],
         "schedule_blocked": [
           {
-            "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+            "content_item_id": "ab8a417f-7ab7-4887-ad27-293ac1538e67",
             "platform": "linkedin",
             "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
           }
@@ -1738,7 +1738,7 @@
         ],
         "errors": [
           {
-            "at": "2026-11-04T15:39:44.126819+00:00",
+            "at": "2026-11-04T16:58:06.717013+00:00",
             "stage": "schedule",
             "code": "blocked",
             "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
@@ -2034,12 +2034,12 @@
         "strategy_id": null,
         "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
         "content_item_ids": [
-          "8b368d01-661d-4f26-aa30-03c527659d1d"
+          "ab8a417f-7ab7-4887-ad27-293ac1538e67"
         ],
         "schedule_plan": [],
         "schedule_blocked": [
           {
-            "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+            "content_item_id": "ab8a417f-7ab7-4887-ad27-293ac1538e67",
             "platform": "linkedin",
             "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
           }
@@ -2095,7 +2095,7 @@
         ],
         "errors": [
           {
-            "at": "2026-11-04T15:39:44.126819+00:00",
+            "at": "2026-11-04T16:58:06.717013+00:00",
             "stage": "schedule",
             "code": "blocked",
             "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
@@ -2399,7 +2399,7 @@
               }
             ]
           },
-          "request_id": "924ed0ee4fea4ccc9b021e632bd263b7"
+          "request_id": "ad32c189c2e94d8c8eb3a16762bfb983"
         }
       }
     },
@@ -2411,7 +2411,7 @@
           "code": "unauthenticated",
           "message": "Missing bearer token.",
           "details": {},
-          "request_id": "19ac0f275d6e419b891651311181f797"
+          "request_id": "12556f8df0364efabc93c6ced80be3ef"
         }
       }
     },
@@ -2419,7 +2419,7 @@
       "step": "repeat_approval",
       "status": 200,
       "payload": {
-        "workflow_id": "wf_7782a6ae_ab2dc4dc04_95edd0",
+        "workflow_id": "wf_7782a6ae_ab2dc4dc04_e1735a",
         "status": "completed",
         "brand_profile_id": "7782a6ae-108e-4d0b-a877-7e5681aeaa60",
         "phase": "completed",
@@ -2505,15 +2505,15 @@
           }
         ],
         "approval_request": {
-          "workflow_id": "wf_7782a6ae_ab2dc4dc04_95edd0",
-          "requested_at": "2026-11-04T15:39:43.972277+00:00",
+          "workflow_id": "wf_7782a6ae_ab2dc4dc04_e1735a",
+          "requested_at": "2026-11-04T16:58:06.557586+00:00",
           "items": [
             {
-              "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+              "content_item_id": "ab8a417f-7ab7-4887-ad27-293ac1538e67",
               "title": "Most developer tools optimise the wrong thing.",
               "platform": "linkedin",
               "status": "IN_REVIEW",
-              "content_version_id": "01337235-60d6-457c-9664-b966905807f1",
+              "content_version_id": "4a817d48-4612-4a15-9a75-c8ac120a62c4",
               "version_count": 1
             }
           ],
@@ -2541,10 +2541,10 @@
           "schedule": true,
           "publish_now": false,
           "horizon_days": 7,
-          "decided_at": "2026-11-04T15:39:44.088248+00:00"
+          "decided_at": "2026-11-04T16:58:06.668594+00:00"
         },
         "content_item_ids": [
-          "8b368d01-661d-4f26-aa30-03c527659d1d"
+          "ab8a417f-7ab7-4887-ad27-293ac1538e67"
         ],
         "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
         "summary": "Workflow completed. Founder decision: approve. 1 item(s) updated. Scheduled: 0 (1 blocked). Published now: 0. Measured analytics: not available. Recommendations: 0 (none applied automatically).",
@@ -2552,7 +2552,7 @@
         "schedule_plan": [],
         "schedule_blocked": [
           {
-            "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+            "content_item_id": "ab8a417f-7ab7-4887-ad27-293ac1538e67",
             "platform": "linkedin",
             "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
           }
@@ -2580,19 +2580,19 @@
         "optimization_note": "No measured performance is available yet, so no optimisation was proposed. Performance is read from the platform APIs; it is never inferred.",
         "trace": [
           {
-            "at": "2026-11-04T15:39:43.682678+00:00",
+            "at": "2026-11-04T16:58:06.181225+00:00",
             "entry": "intake",
             "brand": "7782a6ae-108e-4d0b-a877-7e5681aeaa60"
           },
           {
-            "at": "2026-11-04T15:39:43.683551+00:00",
+            "at": "2026-11-04T16:58:06.182270+00:00",
             "entry": "context_loaded",
             "goals": 0,
             "audience": 2,
             "personality": 4
           },
           {
-            "at": "2026-11-04T15:39:43.719688+00:00",
+            "at": "2026-11-04T16:58:06.243110+00:00",
             "entry": "plan_created",
             "tasks": 5,
             "agents": [
@@ -2620,14 +2620,14 @@
             "mode": "deterministic_executor"
           },
           {
-            "at": "2026-11-04T15:39:43.729299+00:00",
+            "at": "2026-11-04T16:58:06.252156+00:00",
             "entry": "task_dispatched",
             "task": "research-1",
             "agent": "research",
             "iteration": 1
           },
           {
-            "at": "2026-11-04T15:39:43.753623+00:00",
+            "at": "2026-11-04T16:58:06.288927+00:00",
             "entry": "agent_completed",
             "agent": "research",
             "task": "research-1",
@@ -2635,14 +2635,14 @@
             "confidence": 0.62
           },
           {
-            "at": "2026-11-04T15:39:43.766006+00:00",
+            "at": "2026-11-04T16:58:06.299423+00:00",
             "entry": "task_dispatched",
             "task": "strategy-1",
             "agent": "strategy",
             "iteration": 2
           },
           {
-            "at": "2026-11-04T15:39:43.789356+00:00",
+            "at": "2026-11-04T16:58:06.324095+00:00",
             "entry": "agent_completed",
             "agent": "strategy",
             "task": "strategy-1",
@@ -2650,14 +2650,14 @@
             "confidence": 0.6
           },
           {
-            "at": "2026-11-04T15:39:43.800044+00:00",
+            "at": "2026-11-04T16:58:06.337506+00:00",
             "entry": "task_dispatched",
             "task": "content-1",
             "agent": "content",
             "iteration": 3
           },
           {
-            "at": "2026-11-04T15:39:43.823567+00:00",
+            "at": "2026-11-04T16:58:06.378615+00:00",
             "entry": "agent_completed",
             "agent": "content",
             "task": "content-1",
@@ -2665,14 +2665,14 @@
             "confidence": 0.55
           },
           {
-            "at": "2026-11-04T15:39:43.834746+00:00",
+            "at": "2026-11-04T16:58:06.390587+00:00",
             "entry": "task_dispatched",
             "task": "creative-1",
             "agent": "creative",
             "iteration": 4
           },
           {
-            "at": "2026-11-04T15:39:43.856406+00:00",
+            "at": "2026-11-04T16:58:06.413728+00:00",
             "entry": "agent_completed",
             "agent": "creative",
             "task": "creative-1",
@@ -2680,14 +2680,14 @@
             "confidence": 0.7
           },
           {
-            "at": "2026-11-04T15:39:43.866740+00:00",
+            "at": "2026-11-04T16:58:06.423276+00:00",
             "entry": "task_dispatched",
             "task": "growth-1",
             "agent": "growth_analyst",
             "iteration": 5
           },
           {
-            "at": "2026-11-04T15:39:43.889127+00:00",
+            "at": "2026-11-04T16:58:06.448945+00:00",
             "entry": "agent_completed",
             "agent": "growth_analyst",
             "task": "growth-1",
@@ -2695,29 +2695,29 @@
             "confidence": 0.85
           },
           {
-            "at": "2026-11-04T15:39:43.900300+00:00",
+            "at": "2026-11-04T16:58:06.459600+00:00",
             "entry": "dispatch_complete",
             "iteration": 6
           },
           {
-            "at": "2026-11-04T15:39:43.920436+00:00",
+            "at": "2026-11-04T16:58:06.480169+00:00",
             "entry": "review_completed",
             "verdict": "pass",
             "drafts": 1,
             "findings": 1
           },
           {
-            "at": "2026-11-04T15:39:43.935774+00:00",
+            "at": "2026-11-04T16:58:06.499126+00:00",
             "entry": "campaign_reused",
             "name": "Crusor AI \u2014 Product launch"
           },
           {
-            "at": "2026-11-04T15:39:43.956272+00:00",
+            "at": "2026-11-04T16:58:06.532285+00:00",
             "entry": "drafts_persisted",
             "count": 1
           },
           {
-            "at": "2026-11-04T15:39:43.972290+00:00",
+            "at": "2026-11-04T16:58:06.557600+00:00",
             "entry": "approval_requested",
             "items": 1
           },
@@ -2726,37 +2726,37 @@
             "action": "approve"
           },
           {
-            "at": "2026-11-04T15:39:44.112623+00:00",
+            "at": "2026-11-04T16:58:06.701169+00:00",
             "entry": "decision_applied",
             "action": "approve",
             "items": 1
           },
           {
-            "at": "2026-11-04T15:39:44.126832+00:00",
+            "at": "2026-11-04T16:58:06.717028+00:00",
             "entry": "content_scheduled",
             "scheduled": 0,
             "blocked": 1
           },
           {
-            "at": "2026-11-04T15:39:44.137113+00:00",
+            "at": "2026-11-04T16:58:06.726983+00:00",
             "entry": "publish_attempted",
             "published": 0,
             "failed": 0,
             "deferred": 0
           },
           {
-            "at": "2026-11-04T15:39:44.154989+00:00",
+            "at": "2026-11-04T16:58:06.744446+00:00",
             "entry": "analytics_read",
             "available": false,
             "ingested": 0
           },
           {
-            "at": "2026-11-04T15:39:44.178321+00:00",
+            "at": "2026-11-04T16:58:06.764171+00:00",
             "entry": "optimisation_skipped",
             "reason": "no_measurements"
           },
           {
-            "at": "2026-11-04T15:39:44.189121+00:00",
+            "at": "2026-11-04T16:58:06.775463+00:00",
             "entry": "finalized",
             "action": "approve",
             "items": 1,
@@ -2766,7 +2766,7 @@
         ],
         "errors": [
           {
-            "at": "2026-11-04T15:39:44.126819+00:00",
+            "at": "2026-11-04T16:58:06.717013+00:00",
             "stage": "schedule",
             "code": "blocked",
             "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
@@ -3051,7 +3051,7 @@
       }
     }
   ],
-  "workflow_id": "wf_7782a6ae_ab2dc4dc04_95edd0",
+  "workflow_id": "wf_7782a6ae_ab2dc4dc04_e1735a",
   "summary": {
     "status": "completed",
     "lifecycle_stage": "handed_off",
@@ -3062,12 +3062,12 @@
     "strategy_id": null,
     "created_campaign_id": "5328431d-a424-466c-bdcc-c5a83c650cf0",
     "content_item_ids": [
-      "8b368d01-661d-4f26-aa30-03c527659d1d"
+      "ab8a417f-7ab7-4887-ad27-293ac1538e67"
     ],
     "schedule_plan": [],
     "schedule_blocked": [
       {
-        "content_item_id": "8b368d01-661d-4f26-aa30-03c527659d1d",
+        "content_item_id": "ab8a417f-7ab7-4887-ad27-293ac1538e67",
         "platform": "linkedin",
         "reason": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth"
       }
@@ -3123,7 +3123,7 @@
     ],
     "errors": [
       {
-        "at": "2026-11-04T15:39:44.126819+00:00",
+        "at": "2026-11-04T16:58:06.717013+00:00",
         "stage": "schedule",
         "code": "blocked",
         "message": "no connected linkedin account for this brand; authorise one under /api/v1/social/oauth",
@@ -3444,88 +3444,88 @@
   ],
   "api_calls": [
     {
-      "at": "2026-11-04T15:39:43+00:00",
+      "at": "2026-11-04T16:58:05+00:00",
       "method": "GET",
       "path": "/api/v1/system/health",
       "status": 200,
-      "ms": 2.7
+      "ms": 4.3
     },
     {
-      "at": "2026-11-04T15:39:43+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "POST",
       "path": "/api/v1/auth/token",
       "status": 200,
-      "ms": 284.0
+      "ms": 291.6
     },
     {
-      "at": "2026-11-04T15:39:43+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "GET",
       "path": "/api/v1/system/status",
       "status": 200,
-      "ms": 8.4
+      "ms": 8.0
     },
     {
-      "at": "2026-11-04T15:39:43+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "GET",
       "path": "/api/v1/brand/active",
       "status": 200,
-      "ms": 9.5
+      "ms": 12.4
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "POST",
       "path": "/api/v1/director/workflows",
       "status": 201,
-      "ms": 383.2
+      "ms": 476.0
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "GET",
-      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_e1735a",
       "status": 200,
-      "ms": 40.7
+      "ms": 42.8
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "POST",
-      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0/decision",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_e1735a/decision",
       "status": 200,
-      "ms": 209.4
+      "ms": 208.4
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:06+00:00",
       "method": "POST",
       "path": "/api/v1/auth/users",
       "status": 422,
-      "ms": 7.5
+      "ms": 7.0
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:07+00:00",
       "method": "POST",
       "path": "/api/v1/director/workflows",
       "status": 201,
-      "ms": 372.7
+      "ms": 392.6
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:07+00:00",
       "method": "POST",
-      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0/decision",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_e1735a/decision",
       "status": 200,
-      "ms": 58.7
+      "ms": 63.8
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:07+00:00",
       "method": "GET",
-      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_95edd0",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_ab2dc4dc04_e1735a",
       "status": 200,
-      "ms": 32.4
+      "ms": 37.0
     },
     {
-      "at": "2026-11-04T15:39:44+00:00",
+      "at": "2026-11-04T16:58:07+00:00",
       "method": "POST",
-      "path": "/api/v1/director/workflows/wf_7782a6ae_2f52fe1807_fbab67/cancel",
+      "path": "/api/v1/director/workflows/wf_7782a6ae_2f52fe1807_e78f4d/cancel",
       "status": 200,
-      "ms": 80.2
+      "ms": 89.8
     }
   ],
   "result": "pass"

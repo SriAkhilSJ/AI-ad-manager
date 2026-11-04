@@ -294,14 +294,11 @@ added or sharpened:
 - [ ] For creative: `OPENAI_API_KEY` and/or `REPLICATE_API_TOKEN` +
       `REPLICATE_VIDEO_MODEL`, `CREATIVE_PRICING_JSON`, a non-zero
       `CREATIVE_CAMPAIGN_BUDGET_USD`, then `CREATIVE_ALLOW_PAID_GENERATION=true`.
-- [ ] For a spend canary, write an authorisation file and pass it explicitly:
-
-      ```json
-      {"founder": "…", "granted_at": "…Z", "provider": "openai",
-       "max_spend_usd": 0.50, "reference": "…"}
-      ```
-
-      `--allow-spend` without it exits 4. There is no default authorisation.
+- [ ] For a spend canary, copy `docs/founder-authorization.example.json` to a
+      path outside the repository, fill it in, and pass it explicitly with
+      `--founder-authorization`. The file must name the founder, the provider, a
+      `max_spend_usd` ceiling and a reference. `--allow-spend` without it exits 4;
+      there is no default authorisation and no way to encode one in the code.
 - [ ] For ads: per-platform credentials, then
       `POST /api/v1/ads/campaigns/{id}/validate-account`. Creating a campaign is
       still refused until a founder authorisation binds to its proposal hash.

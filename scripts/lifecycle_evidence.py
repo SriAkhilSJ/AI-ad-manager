@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import sys
 import time
 import urllib.error
@@ -248,7 +249,8 @@ def main(argv: list[str] | None = None) -> int:
 
         # --- the boundary: only a founder may approve, and only while paused ---
         editor_email = f"canary-editor-{int(time.time())}@crusor.test"
-        editor_password = "canary-editor-password-1"
+        # generated per run: no credential is ever written down in this file
+        editor_password = secrets.token_urlsafe(18)
         status, created_user = api.call(
             "POST",
             "/api/v1/auth/users",

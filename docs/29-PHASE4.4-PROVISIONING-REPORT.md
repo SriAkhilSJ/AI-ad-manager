@@ -62,6 +62,21 @@ are set. There is nothing to fix in this repository, and nothing was bypassed.
 
 ---
 
+## 1b. What the deployment reader should know about this table
+
+The table is rendered one row per probed host, not one row per provider, because
+a provider with two hosts (Facebook) can hide a failing one behind whichever host
+was probed first. That was a real bug in the first version of the renderer, found
+when CI failed: the table showed `provider["hosts"][0]` only, and the accompanying
+test asserted that the failure detail contained the host name — which is true only
+where egress is blocked. Both are fixed: the renderer emits a row per host, names
+the host in the failure detail, and prints "None — every probed host completed a
+verified TLS handshake" when nothing is blocked; the test now drives a synthetic
+probe instead of the live network, so it passes on a machine with egress and on
+one without.
+
+---
+
 ## 2. Credentials
 
 ### Present now
@@ -241,7 +256,7 @@ Phase 4.4 stops here, at two external blockers, neither of which is code:
 Everything that could be built without them is built and tested: the preflight
 (`environment_preflight.py`), the provisioning tool (`provision_credentials.py`),
 the canary harness, the lifecycle evidence runner, the six-column matrix, and 32
-new tests covering their refusal paths (suite: 1308 passed on SQLite).
+new tests covering their refusal paths (suite: 1310 passed on SQLite).
 
 ```text
 ENVIRONMENT PREFLIGHT:   MEASURED — DNS ok, TCP ok, TLS blocked for every provider

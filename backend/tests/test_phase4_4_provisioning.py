@@ -92,11 +92,39 @@ def test_unknown_provider_is_rejected(preflight):
         preflight.build(["not-a-provider"])
 
 
-def test_render_includes_failure_detail(monkeypatch, preflight):
-    report = preflight.build(["openai"])
-    text = preflight.render(report)
+def test_render_names_every_probed_host_and_its_failure(monkeypatch, preflight):
+    """Rendering is asserted against a synthetic probe, never the live network:
+    a suite that only passes where egress is blocked is not a test."""
+    failing = {
+        "host": "api.openai.com", "dns": "ok", "tcp": "ok", "tls": "fail",
+        "reachable": False, "ms": 31,
+        "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF)",
+        "blocked_by": "no TLS response (SNI/policy block or proxy refusal)",
+    }
+    monkeypatch.setattr(preflight, "probe_host", lambda host: dict(failing, host=host))
+    text = preflight.render(preflight.build(["openai"]))
     assert "Reachable" in text
     assert "api.openai.com" in text
+    assert "SSLZeroReturnError" in text
+    assert "**" in text  # the verdict is visually marked as blocked
+
+
+def test_render_says_so_when_nothing_is_blocked(monkeypatch, preflight):
+    passing = {"host": "api.openai.com", "dns": "ok", "tcp": "ok", "tls": "ok",
+               "https": "200", "reachable": True}
+    monkeypatch.setattr(preflight, "probe_host", lambda host: dict(passing, host=host))
+    text = preflight.render(preflight.build(["openai"]))
+    assert "None — every probed host completed a verified TLS handshake." in text
+
+
+def test_render_shows_each_host_of_a_multi_host_provider(monkeypatch, preflight):
+    def probe(host):
+        return {"host": host, "dns": "ok", "tcp": "ok", "tls": "ok", "https": "200",
+                "reachable": True}
+
+    monkeypatch.setattr(preflight, "probe_host", probe)
+    text = preflight.render(preflight.build(["facebook"]))
+    assert "graph.facebook.com" in text and "www.facebook.com" in text
 
 
 # --------------------------------------------------------------- provisioning

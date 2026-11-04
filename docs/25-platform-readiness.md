@@ -1,12 +1,12 @@
 # 25 — Platform readiness and founder checklist
 
-Generated 2026-11-04T18:08:21+00:00 from code + the current environment (`ENVIRONMENT=development`).
+Generated 2026-11-04T18:33:35+00:00 from code + the current environment (`ENVIRONMENT=development`).
 
 **How to read the columns.** `implemented` is what the code does. `mock-tested` means an automated suite exercises it against `httpx.MockTransport`. `network reachable` is **measured**, not assumed: it comes from `docs/preflight.json` (DNS → TCP → verified TLS → HTTPS from the deployment host). `credentials` is only about presence. `authenticated` means a provider accepted those credentials in a real call. `credential-configured` is only about presence: the environment variables exist *and* the OAuth prerequisites below are met; it is not evidence that a provider accepted them. `sandbox-verified` and `production-verified` can only be filled by a real call against a real developer account, so both are `no` for every row until one is recorded in `docs/04-ACCEPTANCE-EVIDENCE.md`. A feature is not production-ready because its code exists.
 
 ## Network
 
-Measured by `scripts/environment_preflight.py` at 2026-11-04T18:08:03+00:00.
+Measured by `scripts/environment_preflight.py` at 2026-11-04T18:33:34+00:00.
 
 - **Facebook Page**: graph.facebook.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)
 - **Instagram Business**: graph.facebook.com: SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)

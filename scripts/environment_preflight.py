@@ -305,27 +305,33 @@ def render(report: dict[str, Any]) -> str:
     ca_set = [name for name, state in report["ca_env"].items() if state == "set"]
     add(f"Custom CA variables: {', '.join(ca_set) if ca_set else 'none set (system trust store)'}")
     add("")
-    add("| Provider | DNS | TCP | TLS (verified) | HTTPS | Reachable |")
-    add("| --- | --- | --- | --- | --- | --- |")
+    # One row per probed host: a provider with several hosts must not hide a
+    # failing one behind whichever host happened to be probed first.
+    add("| Provider | Host | DNS | TCP | TLS (verified) | HTTPS | Reachable |")
+    add("| --- | --- | --- | --- | --- | --- | --- |")
     for provider in report["providers"]:
-        host = provider["hosts"][0]
-        add(
-            f"| {provider['label']} | {host.get('dns', '-')} | {host.get('tcp', '-')} | "
-            f"{host.get('tls', '-')} | {host.get('https', '-')} | "
-            f"{'yes' if provider['reachable'] else '**no**'} |"
-        )
+        for host in provider["hosts"]:
+            add(
+                f"| {provider['label']} | {host['host']} | {host.get('dns', '-')} | "
+                f"{host.get('tcp', '-')} | {host.get('tls', '-')} | "
+                f"{host.get('https', '-')} | {'yes' if host.get('reachable') else '**no**'} |"
+            )
     add("")
     add("## Failure detail")
     add("")
+    blocked = 0
     for provider in report["providers"]:
         for host in provider["hosts"]:
             if host.get("reachable"):
                 continue
+            blocked += 1
             add(
                 f"- **{host['host']}** ({host.get('ms')} ms): "
                 f"{host.get('dns_error') or host.get('tcp_error') or host.get('tls_error')}"
                 + (f" — {host['blocked_by']}" if host.get("blocked_by") else "")
             )
+    if not blocked:
+        add("None — every probed host completed a verified TLS handshake.")
     add("")
     add("## Environment variables (names only)")
     add("")

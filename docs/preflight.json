@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-11-04T18:08:03+00:00",
+  "generated_at": "2026-11-04T18:33:34+00:00",
   "python": "3.11.2",
   "openssl": "OpenSSL 3.0.20 7 Apr 2026",
-  "clock_utc": "2026-11-04T18:08:03+00:00",
+  "clock_utc": "2026-11-04T18:33:34+00:00",
   "proxy_env": {
     "HTTP_PROXY": "unset",
     "HTTPS_PROXY": "unset",
@@ -52,7 +52,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 28.2,
+          "ms": 29.2,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -83,7 +83,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 32.2,
+          "ms": 42.3,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -112,7 +112,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 69.9,
+          "ms": 98.8,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         },
         {
@@ -128,7 +128,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 22.5,
+          "ms": 28.4,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -159,7 +159,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 27.1,
+          "ms": 62.0,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         },
         {
@@ -177,7 +177,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 59.7,
+          "ms": 66.4,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -206,7 +206,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 26.0,
+          "ms": 76.0,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         },
         {
@@ -221,7 +221,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 24.5,
+          "ms": 25.7,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -241,8 +241,8 @@
           "host": "oauth2.googleapis.com",
           "dns": "ok",
           "addresses": [
-            "2607:f8b0:400e:c17::5f",
-            "74.125.135.95"
+            "142.251.188.95",
+            "2607:f8b0:400e:c1b::5f"
           ],
           "tcp": "ok",
           "tls": "fail",
@@ -250,7 +250,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 24.0,
+          "ms": 25.2,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         },
         {
@@ -280,7 +280,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 27.7,
+          "ms": 25.9,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -311,7 +311,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 43.2,
+          "ms": 33.6,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         },
         {
@@ -329,7 +329,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 46.6,
+          "ms": 70.9,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -358,7 +358,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 47.8,
+          "ms": 143.2,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -401,15 +401,15 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 38.9,
+          "ms": 28.1,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         },
         {
           "host": "oauth2.googleapis.com",
           "dns": "ok",
           "addresses": [
-            "2607:f8b0:400e:c0d::5f",
-            "74.125.135.95"
+            "142.251.188.95",
+            "2607:f8b0:400e:c17::5f"
           ],
           "tcp": "ok",
           "tls": "fail",
@@ -417,7 +417,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 23.4,
+          "ms": 24.5,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],
@@ -449,7 +449,7 @@
           "tls_error": "SSLZeroReturnError: TLS/SSL connection has been closed (EOF) (_ssl.c:992)",
           "https": "skipped",
           "reachable": false,
-          "ms": 55.1,
+          "ms": 59.4,
           "blocked_by": "no TLS response (SNI/policy block or proxy refusal)"
         }
       ],

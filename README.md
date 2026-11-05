@@ -101,6 +101,8 @@ cd frontend && npm install && npm run dev    # http://localhost:5173
 
 API docs: <http://localhost:8000/docs>. Sign in with the bootstrap founder.
 
+For a full step-by-step local setup running completely natively without containers (PostgreSQL, Redis, Celery, Backend, Frontend), see [`docs/30-LOCAL-SETUP-NO-DOCKER.md`](docs/30-LOCAL-SETUP-NO-DOCKER.md).
+
 To enable publishing you additionally need a vault key and that platform's own app
 credentials — see [`docs/24-ENVIRONMENT-CHECKLIST.md`](docs/24-ENVIRONMENT-CHECKLIST.md).
 

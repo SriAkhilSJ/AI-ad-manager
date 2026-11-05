@@ -137,7 +137,8 @@ def test_keygen_writes_a_0600_file_with_a_valid_key(provision, tmp_path, capsys)
     target = tmp_path / "vault.key"
     path = provision.write_key_file(target)
     mode = stat.S_IMODE(path.stat().st_mode)
-    assert mode == 0o600
+    if sys.platform != 'win32':
+        assert mode == 0o600
     content = path.read_text().strip()
     assert content.startswith("TOKEN_VAULT_KEY=")
     key = content.split("=", 1)[1]

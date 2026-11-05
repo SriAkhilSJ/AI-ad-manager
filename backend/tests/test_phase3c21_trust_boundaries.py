@@ -89,7 +89,7 @@ def _package(tmp_path: Path, *, licence: str | None = None) -> Path:
         path.write_text(f"// {name}\n", encoding="utf-8")
     (root / "manifest.json").write_text('{"version": "1.2.1"}', encoding="utf-8")
     if licence is not None:
-        (root / "LICENSE").write_text(licence, encoding="utf-8")
+        (root / "LICENSE").write_text(licence, encoding="utf-8", newline="\n")
     return root
 
 
